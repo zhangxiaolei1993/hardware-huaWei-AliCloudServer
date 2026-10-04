@@ -82,12 +82,16 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
       <tr><td>GET</td><td><code>/api/v1/health</code></td><td>健康检查</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/register</code></td><td>注册设备，返回 device_token（重复注册幂等）</td></tr>
       <tr><td>GET</td><td><code>/api/v1/devices/{device_id}</code></td><td>查询设备（查询时惰性判断 online/offline）</td></tr>
-      <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/heartbeat</code></td><td>心跳，建议约 30 秒一次</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/heartbeat</code></td><td>心跳，每 20 秒一次</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/connect</code></td><td>手机连接设备（无需设备 token）</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/disconnect</code></td><td>手机断开设备</td></tr>
       <tr><td>POST</td><td><code>/api/v1/sessions</code></td><td>创建一次测评会话</td></tr>
       <tr><td>GET</td><td><code>/api/v1/sessions/{session_id}</code></td><td>查询会话</td></tr>
       <tr><td>POST</td><td><code>/api/v1/sessions/{session_id}/status</code></td><td>状态流转：running / completed</td></tr>
       <tr><td>POST</td><td><code>/api/v1/emotion/sessions/{session_id}/data</code></td><td>测评结束后批量上传原始 timeline</td></tr>
       <tr><td>GET</td><td><code>/api/v1/emotion/sessions/{session_id}/result</code></td><td>获取服务器计算的最终结果（Flutter 用）</td></tr>
+      <tr><td>PUT</td><td><code>/api/v1/emotion/devices/{device_id}/status</code></td><td>上报设备实时表情状态（每约 3 秒，需设备认证）</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/emotion/devices/{device_id}/status</code></td><td>查询实时表情状态（Flutter 轮询，无需设备 token）</td></tr>
     </tbody>
   </table>
   <p class="muted">除健康检查外，业务/参数错误统一返回 <code>{"code":..., "message":..., "data":null}</code>；校验失败 code=422。</p>
@@ -118,6 +122,12 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
     <li>timeline 为空 → 拒绝；confidence 必须在 0~1；expression 必须属于 8 类；session 必须存在。</li>
     <li>已 completed 的会话默认禁止再次上传（返回 409）。</li>
     <li>每次上传携带 <code>client_request_id</code>；<code>(session_id, client_request_id)</code> 有唯一约束，网络重试<b>不会重复插入</b>，服务器幂等返回首次结果。</li>
+  </ul>
+  <h3>实时表情状态（设备级，可选）</h3>
+  <ul>
+    <li>Atlas 在采集过程中约每 <b>3 秒</b>通过 <code>PUT /emotion/devices/{id}/status</code> 上报当前人脸/表情。</li>
+    <li>同一设备只保留最新一行，不存历史；与心跳<b>相互独立</b>，不影响 online/offline。</li>
+    <li>Flutter 每 3~5 秒轮询 GET；返回 <code>stale=true</code> 表示超过 <b>10 秒</b>未收到上报，应提示实时信号中断。</li>
   </ul>
 </section>
 

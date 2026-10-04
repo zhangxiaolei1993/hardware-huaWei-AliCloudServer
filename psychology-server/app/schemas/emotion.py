@@ -5,7 +5,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 VALID_EXPRESSIONS = (
     "neutral",
@@ -77,3 +77,42 @@ class EmotionUploadResponse(BaseModel):
 class EmotionResultResponse(BaseModel):
     session_id: str
     result: Optional[EmotionResultData] = None
+
+
+# ---------- 设备实时表情状态 ----------
+class DeviceEmotionStatusRequest(BaseModel):
+    """Atlas 约每 3 秒上报一次的当前识别状态。"""
+
+    face_detected: bool = Field(description="当前帧是否检测到人脸")
+    expression_detected: bool = Field(description="当前是否有效识别出表情")
+    current_expression: Optional[ExpressionType] = Field(
+        default=None, description="当前表情；识别到表情时必填且为 8 类之一"
+    )
+    confidence: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0, description="当前表情置信度，0~1"
+    )
+
+    @model_validator(mode="after")
+    def _check_expression_consistency(self) -> "DeviceEmotionStatusRequest":
+        if self.expression_detected:
+            if self.current_expression is None:
+                raise ValueError(
+                    "current_expression is required when expression_detected is true"
+                )
+        else:
+            # 未识别出表情时不应携带具体表情/置信度
+            self.current_expression = None
+            self.confidence = None
+        return self
+
+
+class DeviceEmotionStatusResponse(BaseModel):
+    device_id: str
+    face_detected: bool
+    expression_detected: bool
+    current_expression: Optional[str]
+    confidence: Optional[float]
+    updated_at: datetime = Field(description="服务器最后一次收到状态的时间")
+    stale: bool = Field(
+        description="距上次上报是否已超过 10 秒；true 表示实时信号可能中断"
+    )

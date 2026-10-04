@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # 心跳超时（秒），超过则视为 offline
     device_offline_after_seconds: int = 30
 
+    # 实时表情状态过期阈值（秒），超过则查询结果标记 stale=true
+    emotion_status_stale_seconds: int = 10
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

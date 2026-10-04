@@ -44,6 +44,7 @@ def init_db() -> None:
     from app.models import (  # noqa: F401
         device,
         device_connection,
+        device_emotion_status,
         emotion_record,
         emotion_result,
         session,

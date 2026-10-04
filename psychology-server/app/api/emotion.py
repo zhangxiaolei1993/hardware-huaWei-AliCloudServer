@@ -12,6 +12,8 @@ from app.core.security import get_current_device
 from app.db.database import get_db
 from app.models.device import Device
 from app.schemas.emotion import (
+    DeviceEmotionStatusRequest,
+    DeviceEmotionStatusResponse,
     EmotionResultData,
     EmotionResultResponse,
     EmotionUploadRequest,
@@ -101,4 +103,68 @@ def get_emotion_result(session_id: str, db: DBSession = Depends(get_db)) -> Any:
             result_json=result.result_json,
             created_at=result.created_at,
         ),
+    )
+
+
+@router.put(
+    "/devices/{device_id}/status",
+    response_model=DeviceEmotionStatusResponse,
+    summary="上报设备实时表情状态",
+    description=(
+        "Atlas 在采集过程中约**每 3 秒**上报一次当前状态（需设备认证头）。\n\n"
+        "- 服务器对同一设备只保留最新一行（upsert），不保存历史\n"
+        "- `expression_detected=true` 时 `current_expression` 必填且为 8 类之一\n"
+        "- `expression_detected=false` 时表情与置信度应为空\n"
+        "- confidence 非空时必须在 0~1\n\n"
+        "该接口与心跳相互独立，不影响 online/offline 判定，也不影响 Session 与批量上传。"
+    ),
+)
+def put_device_status(
+    device_id: str,
+    req: DeviceEmotionStatusRequest,
+    db: DBSession = Depends(get_db),
+    device: Device = Depends(get_current_device),
+) -> Any:
+    if device.device_id != device_id:
+        raise HTTPException(
+            status_code=403, detail="device token does not match device_id"
+        )
+    status = emotion_service.upsert_device_status(db, device_id, req)
+    return DeviceEmotionStatusResponse(
+        device_id=device_id,
+        face_detected=status.face_detected,
+        expression_detected=status.expression_detected,
+        current_expression=status.current_expression,
+        confidence=status.confidence,
+        updated_at=status.updated_at,
+        stale=False,
+    )
+
+
+@router.get(
+    "/devices/{device_id}/status",
+    response_model=DeviceEmotionStatusResponse,
+    summary="查询设备实时表情状态",
+    description=(
+        "返回该设备最新一次上报的实时表情状态（**Flutter 端使用，不需要设备 token**）。\n\n"
+        "- 设备从未上报 → 404\n"
+        "- `stale=true` 表示距上次上报已超过 10 秒，实时信号可能中断，"
+        "App 应提示而不是停留在最后一个表情。\n\n"
+        "建议 Flutter 每 3~5 秒轮询一次。"
+    ),
+)
+def get_device_status(device_id: str, db: DBSession = Depends(get_db)) -> Any:
+    status = emotion_service.get_device_status(db, device_id)
+    if status is None:
+        raise HTTPException(
+            status_code=404, detail=f"no emotion status for device {device_id}"
+        )
+    return DeviceEmotionStatusResponse(
+        device_id=device_id,
+        face_detected=status.face_detected,
+        expression_detected=status.expression_detected,
+        current_expression=status.current_expression,
+        confidence=status.confidence,
+        updated_at=status.updated_at,
+        stale=emotion_service.is_status_stale(status),
     )

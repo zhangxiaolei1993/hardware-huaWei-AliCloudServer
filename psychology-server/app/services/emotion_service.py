@@ -9,12 +9,18 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session as DBSession
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.database import utcnow
+from app.models.device_emotion_status import DeviceEmotionStatus
 from app.models.emotion_record import EmotionRecord
 from app.models.emotion_result import EmotionResult
 from app.models.session import SessionModel
-from app.schemas.emotion import SessionMeta, TimelineItem
+from app.schemas.emotion import (
+    DeviceEmotionStatusRequest,
+    SessionMeta,
+    TimelineItem,
+)
 
 logger = get_logger(__name__)
 
@@ -193,3 +199,55 @@ def get_result(db: DBSession, session_id: str) -> Optional[EmotionResult]:
 
 def _get_result(db: DBSession, session_id: str) -> Optional[EmotionResult]:
     return db.query(EmotionResult).filter(EmotionResult.session_id == session_id).first()
+
+
+# ---------- 设备实时表情状态 ----------
+def upsert_device_status(
+    db: DBSession, device_id: str, req: DeviceEmotionStatusRequest
+) -> DeviceEmotionStatus:
+    """上报实时状态：同一设备只保留最新一行（存在则更新，不存在则插入）。"""
+    status = (
+        db.query(DeviceEmotionStatus)
+        .filter(DeviceEmotionStatus.device_id == device_id)
+        .first()
+    )
+    now = utcnow()
+    if status is None:
+        status = DeviceEmotionStatus(
+            device_id=device_id,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(status)
+
+    status.face_detected = req.face_detected
+    status.expression_detected = req.expression_detected
+    status.current_expression = req.current_expression
+    status.confidence = req.confidence
+    status.updated_at = now
+
+    db.commit()
+    db.refresh(status)
+    logger.info(
+        "emotion status upsert: device=%s face=%s expression=%s confidence=%s",
+        device_id,
+        req.face_detected,
+        req.current_expression,
+        req.confidence,
+    )
+    return status
+
+
+def get_device_status(db: DBSession, device_id: str) -> Optional[DeviceEmotionStatus]:
+    return (
+        db.query(DeviceEmotionStatus)
+        .filter(DeviceEmotionStatus.device_id == device_id)
+        .first()
+    )
+
+
+def is_status_stale(status: DeviceEmotionStatus, now: Optional[Any] = None) -> bool:
+    """距上次上报超过阈值（默认 10 秒）即视为过期。"""
+    current = now or utcnow()
+    threshold = get_settings().emotion_status_stale_seconds
+    return (current - status.updated_at).total_seconds() > threshold

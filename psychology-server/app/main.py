@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, List
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -92,7 +93,11 @@ def create_app() -> FastAPI:
         logger.warning("validation error on %s: %s", request.url.path, exc.errors()[:3])
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"code": 422, "message": "validation error", "data": exc.errors()},
+            content={
+                "code": 422,
+                "message": "validation error",
+                "data": jsonable_encoder(exc.errors()),
+            },
         )
 
     @app.exception_handler(Exception)
