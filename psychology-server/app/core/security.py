@@ -36,3 +36,25 @@ def get_current_device(
             detail="Invalid device credentials",
         )
     return device
+
+
+def get_optional_device(
+    x_device_id: Optional[str] = Header(default=None),
+    x_device_token: Optional[str] = Header(default=None),
+    db: DBSession = Depends(get_db),
+) -> Optional[Device]:
+    """可选设备认证：未带头 → None；带头则必须有效（无效仍 401）。"""
+    if not x_device_id and not x_device_token:
+        return None
+    if not x_device_id or not x_device_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-Device-Id or X-Device-Token header",
+        )
+    device = db.query(Device).filter(Device.device_id == x_device_id).first()
+    if device is None or not verify_token(device.device_token, x_device_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid device credentials",
+        )
+    return device

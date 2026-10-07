@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
-from app.core.security import get_current_device
+from app.core.security import get_current_device, get_optional_device
 from app.db.database import get_db
 from app.models.device import Device
 from app.models.session import SessionModel
@@ -31,16 +31,47 @@ def _get_session_or_404(db: DBSession, session_id: str) -> SessionModel:
     response_model=SessionCreatedResponse,
     status_code=201,
     summary="创建会话",
-    description="创建一次测评/采集会话。当前 `session_type` 仅支持 `emotion`；需设备认证。",
+    description=(
+        "创建一次测评/采集会话。当前 `session_type` 仅支持 `emotion`。\n\n"
+        "**两种鉴权方式二选一：**\n"
+        "- **设备端（Atlas）**：请求头带 `X-Device-Id` / `X-Device-Token`，"
+        "`connection_id` 留空\n"
+        "- **手机端（Flutter）**：先 connect 拿到 `connection_id` 并放入请求体，"
+        "无需设备 token；连接必须仍为 connected 状态，且设备一致"
+    ),
 )
 def create_session(
     req: SessionCreateRequest,
     db: DBSession = Depends(get_db),
-    device: Device = Depends(get_current_device),
+    device: Device | None = Depends(get_optional_device),
 ) -> Any:
-    # 只允许设备为自己的 device_id 创建会话
-    if req.device_id != device.device_id:
-        raise HTTPException(status_code=403, detail="cannot create session for another device")
+    if req.connection_id:
+        # 手机端：校验 connection_id 有效且属于该设备
+        connection = device_service.get_connection(db, req.connection_id)
+        if connection is None:
+            raise HTTPException(
+                status_code=404, detail=f"connection {req.connection_id} not found"
+            )
+        if connection.status != "connected":
+            raise HTTPException(
+                status_code=409, detail="connection is not active, please reconnect"
+            )
+        if connection.device_id != req.device_id:
+            raise HTTPException(
+                status_code=403, detail="connection belongs to another device"
+            )
+    elif device is not None:
+        # 设备端：只能为自己创建
+        if req.device_id != device.device_id:
+            raise HTTPException(
+                status_code=403, detail="cannot create session for another device"
+            )
+    else:
+        raise HTTPException(
+            status_code=401,
+            detail="either connection_id in body or device credentials in headers is required",
+        )
+
     target_device = device_service.get_device(db, req.device_id)
     if target_device is None:
         raise HTTPException(status_code=404, detail=f"device {req.device_id} not registered")

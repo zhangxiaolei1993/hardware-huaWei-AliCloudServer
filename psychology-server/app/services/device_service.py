@@ -51,6 +51,14 @@ def get_device(db: DBSession, device_id: str) -> Optional[Device]:
     return db.query(Device).filter(Device.device_id == device_id).first()
 
 
+def get_connection(db: DBSession, connection_id: str) -> Optional[DeviceConnection]:
+    return (
+        db.query(DeviceConnection)
+        .filter(DeviceConnection.connection_id == connection_id)
+        .first()
+    )
+
+
 def effective_status(device: Device) -> str:
     """惰性判断在线状态：超过 N 秒无心跳视为 offline。"""
     settings = get_settings()

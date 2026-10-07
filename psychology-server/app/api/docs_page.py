@@ -85,7 +85,7 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/heartbeat</code></td><td>心跳，每 20 秒一次</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/connect</code></td><td>手机连接设备（无需设备 token）</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/disconnect</code></td><td>手机断开设备</td></tr>
-      <tr><td>POST</td><td><code>/api/v1/sessions</code></td><td>创建一次测评会话</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/sessions</code></td><td>创建测评会话（设备 token 或 connection_id 二选一）</td></tr>
       <tr><td>GET</td><td><code>/api/v1/sessions/{session_id}</code></td><td>查询会话</td></tr>
       <tr><td>POST</td><td><code>/api/v1/sessions/{session_id}/status</code></td><td>状态流转：running / completed</td></tr>
       <tr><td>POST</td><td><code>/api/v1/emotion/sessions/{session_id}/data</code></td><td>测评结束后批量上传原始 timeline</td></tr>
@@ -134,11 +134,18 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
 <section>
   <h2>5. Atlas 调用顺序</h2>
   <pre><code>1. POST /api/v1/devices/register          → 保存 device_token
-2. POST /api/v1/devices/{id}/heartbeat    → 每约 30s 一次（贯穿全程）
+2. POST /api/v1/devices/{id}/heartbeat    → 每 20s 一次（贯穿全程）
 3. POST /api/v1/sessions                  → 拿到 session_id
 4. 本地采集 + 推理 + 记录 timeline
 5. POST /api/v1/emotion/sessions/{id}/data → 测评结束批量上传（client_request_id 用 UUID）
 6. GET  /api/v1/emotion/sessions/{id}/result → Flutter 获取结果</code></pre>
+  <h3>Flutter 驱动流程（手机拿不到设备 token，用 connection_id）</h3>
+  <pre><code>1. POST /api/v1/devices/{id}/connect        → 保存 connection_id
+2. POST /api/v1/sessions                    → body 带 connection_id，拿到 session_id
+3. 测评中轮询 GET /emotion/devices/{id}/status  → 实时表情（可选）
+4. GET  /api/v1/emotion/sessions/{id}/result    → 获取最终结果
+5. POST /api/v1/devices/{id}/disconnect     → 退出时断开</code></pre>
+  <div class="note">注意：若由 Flutter 创建 session，Atlas 端需要能拿到 session_id 才能上传数据（Atlas 轮询云端当前会话，或由 App 告知）。该链路打通方式需与设备端约定。</div>
 </section>
 
 <section>
