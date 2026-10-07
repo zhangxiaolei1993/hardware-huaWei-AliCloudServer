@@ -21,6 +21,7 @@ from app.api import devices, emotion, health, sessions
 from app.api.docs_page import router as docs_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
+from app.core.reaper import SessionReaper
 from app.db.database import init_db
 
 setup_logging()
@@ -58,10 +59,13 @@ OPENAPI_TAGS: List[Dict[str, str]] = [
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     init_db()
+    reaper = SessionReaper()
+    reaper.start()
     logger.info(
         "%s started: env=%s port=%d", settings.app_name, settings.env, settings.port
     )
     yield
+    reaper.stop()
     logger.info("%s stopped", settings.app_name)
 
 

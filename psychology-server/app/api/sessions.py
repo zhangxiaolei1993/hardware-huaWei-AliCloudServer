@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
-from app.core.security import get_current_device, get_optional_device
+from app.core.security import get_optional_device
 from app.db.database import get_db
 from app.models.device import Device
 from app.models.session import SessionModel
@@ -104,17 +104,20 @@ def get_session(session_id: str, db: DBSession = Depends(get_db)) -> Any:
     summary="更新会话状态",
     description=(
         "状态流转：`created → running → completed`。传 `running` 记录 started_at，"
-        "传 `completed` 记录 ended_at；需设备认证，且只能操作本设备的会话。"
+        "传 `completed` 记录 ended_at。\n\n"
+        "**免认证即可调用**（session_id 为随机 UUID、不可猜测）：手机 App 可直接收尾；"
+        "若请求携带设备认证头，则必须是本设备的会话（不匹配返回 403）。"
     ),
 )
 def update_session_status(
     session_id: str,
     req: SessionStatusUpdateRequest,
     db: DBSession = Depends(get_db),
-    device: Device = Depends(get_current_device),
+    device: Device | None = Depends(get_optional_device),
 ) -> Any:
     session = _get_session_or_404(db, session_id)
-    if session.device_id != device.device_id:
+    # 带设备凭证时校验归属；不带凭证（手机端）凭 session_id 即可操作
+    if device is not None and session.device_id != device.device_id:
         raise HTTPException(status_code=403, detail="session belongs to another device")
     try:
         session = session_service.update_status(db, session, req.status)

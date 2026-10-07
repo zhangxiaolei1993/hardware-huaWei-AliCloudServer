@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # 实时表情状态过期阈值（秒），超过则查询结果标记 stale=true
     emotion_status_stale_seconds: int = 10
 
+    # 僵尸会话：设备心跳消失超过该秒数，未完成会话自动置 interrupted
+    session_interrupt_after_seconds: int = 120
+    # 后台扫描间隔（秒）
+    session_reaper_interval_seconds: int = 60
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

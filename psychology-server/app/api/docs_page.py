@@ -68,10 +68,10 @@ Device  →  Session  →  EEG API        →  EEG Service                     �
 
 <section>
   <h2>2. 设备认证</h2>
-  <p>设备先调用注册接口获得 <code>device_token</code>；之后除注册和健康检查外，所有设备接口都必须携带请求头：</p>
+  <p>设备先调用注册接口获得 <code>device_token</code>。<b>写操作</b>（心跳、表情数据上传）需携带请求头：</p>
   <pre><code>X-Device-Id: atlas_001
 X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
-  <p class="muted">token 由服务器生成并存入数据库，不出现在代码中；请设备端妥善保存。</p>
+  <p class="muted">查询类接口（设备列表/详情、connect/disconnect、active-session、会话状态流转、实时状态、结果查询）免认证；session_id 为随机 UUID、不可猜测。token 由服务器生成并存库，不出现在代码中。</p>
 </section>
 
 <section>
@@ -89,7 +89,7 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/disconnect</code></td><td>手机断开设备</td></tr>
       <tr><td>POST</td><td><code>/api/v1/sessions</code></td><td>创建测评会话（设备必须在线，否则 409）</td></tr>
       <tr><td>GET</td><td><code>/api/v1/sessions/{session_id}</code></td><td>查询会话</td></tr>
-      <tr><td>POST</td><td><code>/api/v1/sessions/{session_id}/status</code></td><td>状态流转：running / completed</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/sessions/{session_id}/status</code></td><td>状态流转：running / completed（免认证，手机可直接收尾）</td></tr>
       <tr><td>POST</td><td><code>/api/v1/emotion/sessions/{session_id}/data</code></td><td>测评结束后批量上传原始 timeline</td></tr>
       <tr><td>GET</td><td><code>/api/v1/emotion/sessions/{session_id}/result</code></td><td>获取服务器计算的最终结果（Flutter 用）</td></tr>
       <tr><td>PUT</td><td><code>/api/v1/emotion/devices/{device_id}/status</code></td><td>上报设备实时表情状态（每约 3 秒，需设备认证）</td></tr>
@@ -97,6 +97,8 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
     </tbody>
   </table>
   <p class="muted">除健康检查外，业务/参数错误统一返回 <code>{"code":..., "message":..., "data":null}</code>；校验失败 code=422。</p>
+  <p class="note">会话状态：<b>created</b>（已创建）→ <b>running</b>（测评中）→ <b>completed</b>（正常结束，有结果）；
+  <b>interrupted</b>（异常中断）：云端后台每 60 秒扫描，设备心跳消失超过 120 秒的未完成会话自动置 interrupted，数据保留、不再出现在 active-session 查询中。</p>
 </section>
 
 <section>
