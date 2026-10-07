@@ -82,6 +82,7 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
       <tr><td>GET</td><td><code>/api/v1/health</code></td><td>健康检查</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/register</code></td><td>注册设备，返回 device_token（重复注册幂等）</td></tr>
       <tr><td>GET</td><td><code>/api/v1/devices/{device_id}</code></td><td>查询设备（查询时惰性判断 online/offline）</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/devices/{device_id}/active-session</code></td><td>查询设备当前活跃会话（免认证，Atlas 轮询获取 session_id）</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/heartbeat</code></td><td>心跳，每 20 秒一次</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/connect</code></td><td>手机连接设备（无需设备 token）</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/disconnect</code></td><td>手机断开设备</td></tr>
@@ -140,12 +141,13 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
 5. POST /api/v1/emotion/sessions/{id}/data → 测评结束批量上传（client_request_id 用 UUID）
 6. GET  /api/v1/emotion/sessions/{id}/result → Flutter 获取结果</code></pre>
   <h3>Flutter 驱动流程（手机拿不到设备 token，用 connection_id）</h3>
-  <pre><code>1. POST /api/v1/devices/{id}/connect        → 保存 connection_id
+  <pre><code>1. POST /api/v1/devices/{id}/connect        → 手机保存 connection_id
 2. POST /api/v1/sessions                    → body 带 connection_id，拿到 session_id
-3. 测评中轮询 GET /emotion/devices/{id}/status  → 实时表情（可选）
-4. GET  /api/v1/emotion/sessions/{id}/result    → 获取最终结果
-5. POST /api/v1/devices/{id}/disconnect     → 退出时断开</code></pre>
-  <div class="note">注意：若由 Flutter 创建 session，Atlas 端需要能拿到 session_id 才能上传数据（Atlas 轮询云端当前会话，或由 App 告知）。该链路打通方式需与设备端约定。</div>
+3. Atlas 每 2~3s GET /devices/{id}/active-session → 免认证轮询，拿到 session_id 后开始测评
+4. 测评中轮询 GET /emotion/devices/{id}/status  → 实时表情（可选）
+5. 测评结束 Atlas 上传，手机 GET /emotion/sessions/{id}/result → 获取最终结果
+6. POST /api/v1/devices/{id}/disconnect     → 退出时断开</code></pre>
+  <div class="note">关键点：Atlas 无需设备 token 即可通过 active-session 接口查到由手机创建的 session_id；无活跃会话时返回 null。</div>
 </section>
 
 <section>

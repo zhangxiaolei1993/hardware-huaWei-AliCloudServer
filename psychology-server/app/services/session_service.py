@@ -46,6 +46,23 @@ def get_session(db: DBSession, session_id: str) -> Optional[SessionModel]:
     return db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
 
 
+def get_active_session(
+    db: DBSession, device_id: str, session_type: Optional[str] = None
+) -> Optional[SessionModel]:
+    """查询设备当前未完成的会话（created/running），返回最新一个。
+
+    设备（Atlas）通过此接口拿到由手机端创建的 session_id；
+    无未完成会话时返回 None。
+    """
+    query = db.query(SessionModel).filter(
+        SessionModel.device_id == device_id,
+        SessionModel.status.in_(("created", "running")),
+    )
+    if session_type is not None:
+        query = query.filter(SessionModel.session_type == session_type)
+    return query.order_by(SessionModel.id.desc()).first()
+
+
 def update_status(db: DBSession, session: SessionModel, new_status: str) -> SessionModel:
     """状态流转：created → running → completed。"""
     now = utcnow()

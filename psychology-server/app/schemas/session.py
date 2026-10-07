@@ -23,6 +23,15 @@ class SessionCreatedResponse(BaseModel):
     status: str
 
 
+class ActiveSessionResponse(BaseModel):
+    """设备查询当前活跃会话（免认证）；无活跃会话时 session_id 为 None。"""
+
+    device_id: str
+    session_id: Optional[str] = None
+    session_type: Optional[str] = None
+    status: Optional[str] = None
+
+
 class SessionStatusUpdateRequest(BaseModel):
     status: Literal["running", "completed"]
 

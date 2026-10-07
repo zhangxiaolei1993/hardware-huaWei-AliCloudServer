@@ -18,7 +18,8 @@ from app.schemas.device import (
     HeartbeatRequest,
     HeartbeatResponse,
 )
-from app.services import device_service
+from app.schemas.session import ActiveSessionResponse
+from app.services import device_service, session_service
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -56,6 +57,29 @@ def get_device(device_id: str, db: DBSession = Depends(get_db)) -> Any:
     # 惰性刷新在线状态
     device.status = device_service.effective_status(device)
     return device
+
+
+@router.get(
+    "/{device_id}/active-session",
+    response_model=ActiveSessionResponse,
+    summary="查询设备当前活跃会话",
+    description=(
+        "返回该设备当前未完成（created/running）的最新会话，**免认证、无需设备 token**。\n\n"
+        "- 无活跃会话 → `session_id=null`，设备可持续轮询\n"
+        "- 有会话 → 返回 session_id 与状态，Atlas 据此关联由手机端创建的测评\n\n"
+        "建议 Atlas 每 2~3 秒轮询一次。"
+    ),
+)
+def get_active_session(device_id: str, db: DBSession = Depends(get_db)) -> Any:
+    session = session_service.get_active_session(db, device_id)
+    if session is None:
+        return ActiveSessionResponse(device_id=device_id)
+    return ActiveSessionResponse(
+        device_id=device_id,
+        session_id=session.session_id,
+        session_type=session.session_type,
+        status=session.status,
+    )
 
 
 @router.post(
