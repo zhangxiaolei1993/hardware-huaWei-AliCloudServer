@@ -33,6 +33,7 @@ def _get_session_or_404(db: DBSession, session_id: str) -> SessionModel:
     summary="创建会话",
     description=(
         "创建一次测评/采集会话。当前 `session_type` 仅支持 `emotion`。\n\n"
+        "**前置条件：设备必须在线**（30 秒内有心跳），否则返回 409，手机应提示设备离线。\n\n"
         "**两种鉴权方式二选一：**\n"
         "- **设备端（Atlas）**：请求头带 `X-Device-Id` / `X-Device-Token`，"
         "`connection_id` 留空\n"
@@ -75,6 +76,12 @@ def create_session(
     target_device = device_service.get_device(db, req.device_id)
     if target_device is None:
         raise HTTPException(status_code=404, detail=f"device {req.device_id} not registered")
+    # 设备必须在线才允许创建会话；离线时拒绝，避免手机误开测评
+    if device_service.effective_status(target_device) != "online":
+        raise HTTPException(
+            status_code=409,
+            detail=f"device {req.device_id} is offline, cannot create session",
+        )
     session = session_service.create_session(
         db, target_device, session_type=req.session_type, user_id=req.user_id
     )

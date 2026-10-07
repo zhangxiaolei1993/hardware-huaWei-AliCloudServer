@@ -86,7 +86,7 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/heartbeat</code></td><td>心跳，每 20 秒一次</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/connect</code></td><td>手机连接设备（无需设备 token）</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/disconnect</code></td><td>手机断开设备</td></tr>
-      <tr><td>POST</td><td><code>/api/v1/sessions</code></td><td>创建测评会话（设备 token 或 connection_id 二选一）</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/sessions</code></td><td>创建测评会话（设备必须在线，否则 409）</td></tr>
       <tr><td>GET</td><td><code>/api/v1/sessions/{session_id}</code></td><td>查询会话</td></tr>
       <tr><td>POST</td><td><code>/api/v1/sessions/{session_id}/status</code></td><td>状态流转：running / completed</td></tr>
       <tr><td>POST</td><td><code>/api/v1/emotion/sessions/{session_id}/data</code></td><td>测评结束后批量上传原始 timeline</td></tr>
@@ -147,7 +147,7 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
 4. 测评中轮询 GET /emotion/devices/{id}/status  → 实时表情（可选）
 5. 测评结束 Atlas 上传，手机 GET /emotion/sessions/{id}/result → 获取最终结果
 6. POST /api/v1/devices/{id}/disconnect     → 退出时断开</code></pre>
-  <div class="note">关键点：Atlas 无需设备 token 即可通过 active-session 接口查到由手机创建的 session_id；无活跃会话时返回 null。</div>
+  <div class="note">关键点：Atlas 无需设备 token 即可通过 active-session 接口查到由手机创建的 session_id；无活跃会话时返回 null。<b>设备离线时无法创建会话（409），需先让设备上线。</b></div>
 </section>
 
 <section>
