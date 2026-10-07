@@ -81,6 +81,7 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
     <tbody>
       <tr><td>GET</td><td><code>/api/v1/health</code></td><td>健康检查</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/register</code></td><td>注册设备，返回 device_token（重复注册幂等）</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/devices</code></td><td>列出所有设备（免认证），不知道 device_id 时先查这里</td></tr>
       <tr><td>GET</td><td><code>/api/v1/devices/{device_id}</code></td><td>查询设备（查询时惰性判断 online/offline）</td></tr>
       <tr><td>GET</td><td><code>/api/v1/devices/{device_id}/active-session</code></td><td>查询设备当前活跃会话（免认证，Atlas 轮询获取 session_id）</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/heartbeat</code></td><td>心跳，每 20 秒一次</td></tr>

@@ -1,7 +1,7 @@
 """设备服务：注册 / 查询 / 心跳 / App 连接管理。"""
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy.orm import Session as DBSession
 
@@ -49,6 +49,14 @@ def register_device(db: DBSession, req: DeviceRegisterRequest) -> tuple[Device, 
 
 def get_device(db: DBSession, device_id: str) -> Optional[Device]:
     return db.query(Device).filter(Device.device_id == device_id).first()
+
+
+def list_devices(db: DBSession) -> List[Device]:
+    """列出所有已注册设备（按注册时间倒序），并惰性刷新在线状态。"""
+    devices = db.query(Device).order_by(Device.id.desc()).all()
+    for device in devices:
+        device.status = effective_status(device)
+    return devices
 
 
 def get_connection(db: DBSession, connection_id: str) -> Optional[DeviceConnection]:

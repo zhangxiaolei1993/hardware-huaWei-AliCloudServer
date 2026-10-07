@@ -45,6 +45,19 @@ def register_device(req: DeviceRegisterRequest, db: DBSession = Depends(get_db))
 
 
 @router.get(
+    "",
+    response_model=list[DeviceOut],
+    summary="列出所有设备",
+    description=(
+        "返回所有已注册设备（免认证），包含每台设备的 **device_id**、名称、型号与当前在线状态。\n\n"
+        "当不知道 device_id 时，先调用本接口查看；手机可据此让用户选择要连接的设备。"
+    ),
+)
+def list_devices(db: DBSession = Depends(get_db)) -> Any:
+    return device_service.list_devices(db)
+
+
+@router.get(
     "/{device_id}",
     response_model=DeviceOut,
     summary="查询设备",
