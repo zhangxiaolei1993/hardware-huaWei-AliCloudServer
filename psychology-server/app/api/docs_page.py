@@ -124,7 +124,7 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
   <h3>校验与防重复</h3>
   <ul>
     <li>timeline 为空 → 拒绝；confidence 必须在 0~1；expression 必须属于 8 类；session 必须存在。</li>
-    <li>已 completed 的会话默认禁止再次上传（返回 409）。</li>
+    <li>会话已有结果时，仅相同 <code>client_request_id</code> 幂等返回，其余拒绝（409）；已 completed/interrupted 但尚无结果的会话允许设备收尾补传一次。</li>
     <li>每次上传携带 <code>client_request_id</code>；<code>(session_id, client_request_id)</code> 有唯一约束，网络重试<b>不会重复插入</b>，服务器幂等返回首次结果。</li>
   </ul>
   <h3>实时表情状态（设备级，可选）</h3>

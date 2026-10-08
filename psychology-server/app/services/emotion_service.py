@@ -130,22 +130,25 @@ def upload_emotion_data(
     """
     if len(timeline) == 0:
         raise EmotionBusinessError("timeline is empty", status_code=422)
-    if session.status == "completed":
-        # 已完成：只有完全相同的 client_request_id 才幂等返回，否则拒绝
-        existing = _get_result(db, session.session_id)
-        if existing is not None and existing.client_request_id == client_request_id:
-            return existing, True
-        raise EmotionBusinessError(
-            "session already completed, re-upload is not allowed",
-            status_code=409,
-        )
 
     existing = _get_result(db, session.session_id)
     if existing is not None:
+        # 已有结果：仅相同 client_request_id 幂等返回，其余一律拒绝（防重复入库）
         if existing.client_request_id == client_request_id:
             return existing, True
         raise EmotionBusinessError(
             "session already has data from another request", status_code=409
+        )
+
+    # 尚无结果时，允许为已结束的会话"收尾补传一次"：正常时序是 Atlas 轮询到
+    # 会话 completed/消失后才批量上传；interrupted（心跳超时兜底）同理。
+    # 能走到这里说明该会话从未入库过任何结果，因此接受；一旦已有结果则按
+    # 上面的幂等/409 规则处理，保证不会重复插入。
+    if session.status in ("completed", "interrupted"):
+        logger.info(
+            "late emotion upload accepted: session=%s previous_status=%s",
+            session.session_id,
+            session.status,
         )
 
     computed = compute_result(session_meta, timeline)
@@ -180,7 +183,9 @@ def upload_emotion_data(
     if session.started_at is None:
         session.started_at = now
     session.status = "completed"
-    session.ended_at = now
+    # 手机先收尾 / reaper 中断时 ended_at 已写入，补传不覆盖该时间
+    if session.ended_at is None:
+        session.ended_at = now
     session.updated_at = now
     db.commit()
     db.refresh(result)

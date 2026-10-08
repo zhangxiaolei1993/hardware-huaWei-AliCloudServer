@@ -34,7 +34,8 @@ router = APIRouter(prefix="/emotion", tags=["emotion"])
         "网络重试幂等、不会重复插入\n"
         "- expression 仅允许 8 类：neutral/happiness/surprise/sadness/anger/disgust/fear/contempt\n"
         "- confidence 必须在 0~1；timeline 不允许为空\n"
-        "- session 必须存在且属于本设备；已 completed 的会话默认拒绝再次上传（409）\n\n"
+        "- 会话已有结果时仅相同 client_request_id 幂等返回，其余拒绝（409）；"
+        "已 completed/interrupted 但尚无结果的会话允许设备收尾补传一次\n\n"
         "服务器接收后重新计算时长、百分比、主导表情、平均置信度与人脸覆盖率。"
     ),
 )
