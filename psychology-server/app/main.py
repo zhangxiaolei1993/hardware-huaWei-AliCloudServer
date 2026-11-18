@@ -17,7 +17,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.api import devices, emotion, health, sessions
+from app.api import devices, emotion, events, exports, health, results, sessions
 from app.api.docs_page import router as docs_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
@@ -128,6 +128,9 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(devices.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
+    app.include_router(events.router, prefix="/api/v1")
+    app.include_router(results.router, prefix="/api/v1")
+    app.include_router(exports.router, prefix="/api/v1")
     app.include_router(emotion.router, prefix="/api/v1")
 
     return app

@@ -25,5 +25,16 @@ class Device(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=None, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=None, nullable=False)
 
+    # ---- M13（v1.4 §17.4 D3）：设备身份保护时间戳 ----
+    identity_changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    token_rotated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    token_revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+
     def __repr__(self) -> str:
         return f"<Device {self.device_id} status={self.status}>"

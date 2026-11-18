@@ -10,6 +10,7 @@ if os.path.exists(_TEST_DB_PATH):
     os.remove(_TEST_DB_PATH)
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 os.environ["LOG_FILE"] = os.path.join(tempfile.gettempdir(), "psychology_test.log")
+os.environ["EXPORT_DIR"] = os.path.join(tempfile.gettempdir(), "psychology_exports_test")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

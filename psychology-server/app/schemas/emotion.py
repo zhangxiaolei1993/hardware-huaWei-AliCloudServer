@@ -30,9 +30,14 @@ ExpressionType = Literal[
 
 
 class TimelineItem(BaseModel):
-    relative_seconds: float = Field(ge=0, description="相对 session 开始的秒数")
+    relative_seconds: float = Field(
+        ge=-5.0, description="相对 session 开始的秒数（允许 -5s 锚点容差）"
+    )
     expression: ExpressionType
     confidence: float = Field(ge=0.0, le=1.0)
+    frame_index: Optional[int] = Field(
+        default=None, ge=0, description="摄像头帧序号（v2 推荐，v1 缺失不拒收）"
+    )
 
 
 class SessionMeta(BaseModel):
@@ -55,7 +60,17 @@ class EmotionUploadRequest(BaseModel):
         description="客户端生成的唯一请求 ID，用于防止网络重试导致重复插入",
     )
     session_meta: SessionMeta = Field(default_factory=SessionMeta)
-    timeline: List[TimelineItem] = Field(min_length=1)
+    timeline: List[TimelineItem] = Field(min_length=1, max_length=50000)
+
+    # ---- 分级兼容接收（P0-14）：v1 固件不带这些字段，全部可选 ----
+    stream_id: Optional[str] = Field(default=None, max_length=40)
+    device_timestamp: Optional[str] = Field(default=None, max_length=40)
+    monotonic_ms: Optional[int] = None
+    clock_offset_ms: Optional[int] = None
+    protocol_version: Optional[str] = Field(default=None, max_length=16)
+    # 客户端伪造的质量字段：接受但一律忽略（AC-21）
+    quality: Optional[str] = None
+    quality_info: Optional[Dict[str, Any]] = None
 
 
 class EmotionResultData(BaseModel):

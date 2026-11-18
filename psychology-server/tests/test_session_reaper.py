@@ -123,7 +123,7 @@ def test_reap_interrupts_never_seen_device(client: TestClient, db_session):
         json={"device_id": dev, "device_name": "从未心跳", "device_type": "edge_ai_device"},
     )
     device = db_session.query(Device).filter(Device.device_id == dev).first()
-    session = session_service.create_session(db_session, device)
+    session, _, _ = session_service.create_session(db_session, device)
 
     interrupted = session_service.reap_stale_sessions(db_session)
     assert session.session_id in interrupted
@@ -162,5 +162,10 @@ def test_active_session_excludes_interrupted(client: TestClient, db_session):
     assert r.json()["session_id"] is None
 
     # 直接查询仍可看到 interrupted 状态（数据保留）
-    r = client.get(f"/api/v1/sessions/{sid}")
+    from app.core.config import get_settings
+
+    r = client.get(
+        f"/api/v1/sessions/{sid}",
+        headers={"X-Api-Key": get_settings().query_api_key},
+    )
     assert r.json()["status"] == "interrupted"

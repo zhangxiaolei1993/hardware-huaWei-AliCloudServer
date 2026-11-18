@@ -87,3 +87,23 @@ class DeviceDisconnectResponse(BaseModel):
     device_id: str
     status: str  # disconnected
     disconnected_at: datetime
+
+
+# ---------- 设备身份保护（§17.4 I5/I9） ----------
+class DeviceTokenRotateResponse(BaseModel):
+    device_id: str
+    device_token: str = Field(description="新 token，仅本次响应返回一次")
+    token_rotated_at: datetime
+
+
+class DeviceRevokeResponse(BaseModel):
+    device_id: str
+    status: str  # revoked
+    token_revoked_at: datetime
+
+
+class DeviceReinstateResponse(BaseModel):
+    device_id: str
+    device_token: str = Field(description="新 token，仅本次响应返回一次")
+    status: str  # active
+    token_rotated_at: datetime

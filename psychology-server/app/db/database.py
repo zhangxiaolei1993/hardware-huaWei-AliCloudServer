@@ -43,6 +43,7 @@ def init_db() -> None:
     # 确保所有模型已导入后再建表
     from app.models import (  # noqa: F401
         device,
+        device_audit_event,
         device_connection,
         device_emotion_status,
         emotion_record,

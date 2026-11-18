@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -10,10 +10,15 @@ from app.db.database import Base
 
 class EmotionResult(Base):
     __tablename__ = "emotion_results"
-    # 防重复上传：session_id + client_request_id 唯一
+    # 防重复上传：session_id + client_request_id 唯一。
+    # 生产库由 scripts/ensure_index.py 以命名唯一索引形式补建，baseline 也按唯一索引
+    # 描述现状，故模型同样用 Index(unique=True)，避免迁移与 ORM 元数据产生差异。
     __table_args__ = (
-        UniqueConstraint(
-            "session_id", "client_request_id", name="uq_emotion_result_session_request"
+        Index(
+            "uq_emotion_result_session_request",
+            "session_id",
+            "client_request_id",
+            unique=True,
         ),
     )
 

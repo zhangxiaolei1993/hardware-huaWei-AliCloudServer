@@ -1,11 +1,18 @@
-"""设备 API：注册 / 查询 / 心跳。"""
-from typing import Any
+"""设备 API：注册 / 查询 / 心跳 / 身份保护。"""
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session as DBSession
 
-from app.core.security import get_current_device
-from app.db.database import get_db
+from app.core.config import get_settings
+from app.core.security import (
+    client_ip,
+    get_current_device,
+    get_device_reader,
+    require_api_key,
+    require_app_key,
+)
+from app.db.database import get_db, utcnow
 from app.models.device import Device
 from app.schemas.device import (
     DeviceConnectRequest,
@@ -15,11 +22,14 @@ from app.schemas.device import (
     DeviceOut,
     DeviceRegisterRequest,
     DeviceRegisterResponse,
+    DeviceReinstateResponse,
+    DeviceRevokeResponse,
+    DeviceTokenRotateResponse,
     HeartbeatRequest,
     HeartbeatResponse,
 )
-from app.schemas.session import ActiveSessionResponse
-from app.services import device_service, session_service
+from app.schemas.session import ActiveSessionResponse, AnchorOut
+from app.services import device_service, identity_service, session_service
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -30,11 +40,29 @@ router = APIRouter(prefix="/devices", tags=["devices"])
     summary="注册设备",
     description=(
         "注册一台设备并返回 **device_token**，设备需保存 token 用于后续认证。\n\n"
-        "同一 `device_id` 重复注册为幂等操作：不会新建记录，返回原 token。"
+        "同一 `device_id` 重复注册为幂等操作：不会新建记录，返回原 token。\n\n"
+        "身份保护（D3）：注册载荷与快照不一致时仍成功，但写审计事件并返回 "
+        "`X-Identity-Warning: changed`；被吊销设备返回 403 `DEVICE_REVOKED`。"
     ),
 )
-def register_device(req: DeviceRegisterRequest, db: DBSession = Depends(get_db)) -> Any:
-    device, created = device_service.register_device(db, req)
+def register_device(
+    req: DeviceRegisterRequest,
+    request: Request,
+    response: Response,
+    db: DBSession = Depends(get_db),
+) -> Any:
+    try:
+        device, created, changes = device_service.register_device(
+            db, req, source_ip=client_ip(request)
+        )
+    except device_service.DeviceRevokedError as exc:
+        raise HTTPException(
+            status_code=403, detail=f"DEVICE_REVOKED: {exc.device_id} is revoked"
+        ) from exc
+
+    if changes:
+        response.headers["X-Identity-Warning"] = "changed"
+
     return DeviceRegisterResponse(
         device_id=device.device_id,
         device_token=device.device_token,
@@ -44,14 +72,101 @@ def register_device(req: DeviceRegisterRequest, db: DBSession = Depends(get_db))
     )
 
 
+@router.post(
+    "/{device_id}/rotate-token",
+    response_model=DeviceTokenRotateResponse,
+    summary="轮换设备 token",
+    description=(
+        "管理接口（需 `X-App-Key`）：原子替换 token，**旧 token 立即失效**，"
+        "新明文仅本次响应返回一次，并记 `token_rotated` 审计。\n\n"
+        "被吊销设备返回 403 `DEVICE_REVOKED`，请改用 `reinstate`。"
+    ),
+    dependencies=[Depends(require_app_key)],
+)
+def rotate_device_token(
+    device_id: str,
+    request: Request,
+    db: DBSession = Depends(get_db),
+) -> Any:
+    device = device_service.get_device(db, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail=f"device {device_id} not found")
+    if device.token_revoked_at is not None:
+        raise HTTPException(
+            status_code=403, detail=f"DEVICE_REVOKED: {device_id} is revoked"
+        )
+    new_token = identity_service.rotate_token(db, device, client_ip(request))
+    return DeviceTokenRotateResponse(
+        device_id=device.device_id,
+        device_token=new_token,
+        token_rotated_at=device.token_rotated_at,
+    )
+
+
+@router.post(
+    "/{device_id}/revoke",
+    response_model=DeviceRevokeResponse,
+    summary="吊销设备 token",
+    description=(
+        "管理接口（需 `X-App-Key`）：置 `token_revoked_at`，token 立即 401；"
+        "该设备再注册返回 403 `DEVICE_REVOKED`。恢复须调用 `reinstate`。重复调用幂等。"
+    ),
+    dependencies=[Depends(require_app_key)],
+)
+def revoke_device(
+    device_id: str,
+    request: Request,
+    db: DBSession = Depends(get_db),
+) -> Any:
+    device = device_service.get_device(db, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail=f"device {device_id} not found")
+    if device.token_revoked_at is None:
+        identity_service.revoke_device(db, device, client_ip(request))
+    return DeviceRevokeResponse(
+        device_id=device.device_id,
+        status="revoked",
+        token_revoked_at=device.token_revoked_at,
+    )
+
+
+@router.post(
+    "/{device_id}/reinstate",
+    response_model=DeviceReinstateResponse,
+    summary="恢复被吊销设备",
+    description=(
+        "管理接口（需 `X-App-Key`）：清除吊销标记并生成**新 token**（仅返回一次）。"
+        "设备需人工更新配置后重启。"
+    ),
+    dependencies=[Depends(require_app_key)],
+)
+def reinstate_device(
+    device_id: str,
+    request: Request,
+    db: DBSession = Depends(get_db),
+) -> Any:
+    device = device_service.get_device(db, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail=f"device {device_id} not found")
+    new_token = identity_service.reinstate_device(db, device, client_ip(request))
+    return DeviceReinstateResponse(
+        device_id=device.device_id,
+        device_token=new_token,
+        status="active",
+        token_rotated_at=device.token_rotated_at,
+    )
+
+
 @router.get(
     "",
     response_model=list[DeviceOut],
     summary="列出所有设备",
     description=(
-        "返回所有已注册设备（免认证），包含每台设备的 **device_id**、名称、型号与当前在线状态。\n\n"
+        "返回所有已注册设备（需 `X-Api-Key`，P0-17），包含每台设备的 **device_id**、"
+        "名称、型号与当前在线状态。\n\n"
         "当不知道 device_id 时，先调用本接口查看；手机可据此让用户选择要连接的设备。"
     ),
+    dependencies=[Depends(require_api_key)],
 )
 def list_devices(db: DBSession = Depends(get_db)) -> Any:
     return device_service.list_devices(db)
@@ -61,15 +176,31 @@ def list_devices(db: DBSession = Depends(get_db)) -> Any:
     "/{device_id}",
     response_model=DeviceOut,
     summary="查询设备",
-    description="按 device_id 查询设备信息。在线状态在查询时惰性判断（超过 30 秒无心跳判为 offline）。",
+    description=(
+        "按 device_id 查询设备信息。在线状态在查询时惰性判断（超过 30 秒无心跳判为 offline）。\n\n"
+        "认证（§12.2 D-4）：设备 token（`X-Device-Id` + `X-Device-Token`）、"
+        "`X-App-Key`、`X-Api-Key` 三者任一。\n\n"
+        "- 设备启动自检用设备 token 调用本接口；token 失效/吊销返回 401，设备据此重新注册\n"
+        "- 设备 token 与 `{device_id}` 不一致返回 403\n"
+        "- 响应恒不含 `device_token`"
+    ),
 )
-def get_device(device_id: str, db: DBSession = Depends(get_db)) -> Any:
+def get_device(
+    device_id: str,
+    db: DBSession = Depends(get_db),
+    caller: Optional[Device] = Depends(get_device_reader),
+) -> Any:
+    if caller is not None and caller.device_id != device_id:
+        raise HTTPException(
+            status_code=403, detail="device token does not match device_id"
+        )
     device = device_service.get_device(db, device_id)
     if device is None:
         raise HTTPException(status_code=404, detail=f"device {device_id} not found")
-    # 惰性刷新在线状态
-    device.status = device_service.effective_status(device)
-    return device
+    # 惰性刷新在线状态：不修改 ORM 实例（§12.2 D-4 / A12）
+    out = DeviceOut.model_validate(device, from_attributes=True)
+    out.status = device_service.effective_status(device)
+    return out
 
 
 @router.get(
@@ -84,14 +215,36 @@ def get_device(device_id: str, db: DBSession = Depends(get_db)) -> Any:
     ),
 )
 def get_active_session(device_id: str, db: DBSession = Depends(get_db)) -> Any:
-    session = session_service.get_active_session(db, device_id)
+    settings = get_settings()
+    device = device_service.get_device(db, device_id)
+    allowed_types = (
+        session_service.allowed_session_types(device) if device is not None else None
+    )
+    session = session_service.get_active_session(
+        db, device_id, allowed_types=allowed_types
+    )
     if session is None:
-        return ActiveSessionResponse(device_id=device_id)
+        return ActiveSessionResponse(
+            device_id=device_id,
+            server_time=utcnow(),
+            poll_interval_seconds=settings.poll_interval_seconds,
+        )
+    anchor = None
+    if session.anchor_utc_at is not None and session.anchor_source is not None:
+        anchor = AnchorOut(
+            utc_at=session.anchor_utc_at,
+            source=session.anchor_source,
+            uncertainty_ms=session.anchor_uncertainty_ms or 0,
+        )
     return ActiveSessionResponse(
         device_id=device_id,
         session_id=session.session_id,
+        external_session_id=session.external_session_id,
         session_type=session.session_type,
         status=session.status,
+        anchor=anchor,
+        server_time=utcnow(),
+        poll_interval_seconds=settings.poll_interval_seconds,
     )
 
 

@@ -81,7 +81,12 @@ def test_01_upload_after_completed_without_result(client):
     STATE["completed_req"] = request_id
 
     # result 可查
-    resp = client.get(f"/api/v1/emotion/sessions/{sid}/result")
+    from app.core.config import get_settings
+
+    resp = client.get(
+        f"/api/v1/emotion/sessions/{sid}/result",
+        headers={"X-Api-Key": get_settings().query_api_key},
+    )
     assert resp.status_code == 200
     assert resp.json()["result"]["face_coverage_percent"] == 100.0
 
@@ -128,8 +133,65 @@ def test_03_late_upload_retry_same_uuid_is_idempotent(client):
     assert resp.json()["duplicate"] is True
 
 
-def test_04_late_upload_new_uuid_after_result_rejected(client):
-    """已有结果后换 UUID 再传 → 409，绝不重复入库。"""
+def test_04_late_upload_new_uuid_accumulates(client):
+    """补传窗口内换 UUID 再传 → 作为新批次累加，结果仍只有一行。"""
+    from app.models.emotion_record import EmotionRecord
+    from app.models.emotion_result import EmotionResult
+
     sid = STATE["completed_sid"]
+    db = SessionLocal()
+    try:
+        before = (
+            db.query(EmotionRecord)
+            .filter(EmotionRecord.session_id == sid)
+            .count()
+        )
+    finally:
+        db.close()
+
+    resp = _upload(client, sid, str(uuid.uuid4()))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["duplicate"] is False
+
+    db = SessionLocal()
+    try:
+        after = (
+            db.query(EmotionRecord)
+            .filter(EmotionRecord.session_id == sid)
+            .count()
+        )
+        assert after == before + len(TIMELINE)
+        assert (
+            db.query(EmotionResult)
+            .filter(EmotionResult.session_id == sid)
+            .count()
+            == 1
+        )
+    finally:
+        db.close()
+
+
+def test_05_late_upload_after_deadline_rejected(client):
+    """超过 late_upload_deadline → 409 LATE_UPLOAD_EXPIRED。"""
+    from datetime import timedelta
+
+    from app.db.database import utcnow
+
+    sid = _create_session(client)
+    client.post(f"/api/v1/sessions/{sid}/status", json={"status": "completed"})
+
+    db = SessionLocal()
+    try:
+        session_obj = (
+            db.query(SessionModel)
+            .filter(SessionModel.session_id == sid)
+            .one()
+        )
+        session_obj.late_upload_deadline = utcnow() - timedelta(seconds=1)
+        db.commit()
+    finally:
+        db.close()
+
     resp = _upload(client, sid, str(uuid.uuid4()))
     assert resp.status_code == 409
+    assert "LATE_UPLOAD_EXPIRED" in resp.json()["message"]

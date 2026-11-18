@@ -1,7 +1,7 @@
 """设备服务：注册 / 查询 / 心跳 / App 连接管理。"""
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session as DBSession
 
@@ -12,19 +12,44 @@ from app.db.database import utcnow
 from app.models.device import Device
 from app.models.device_connection import DeviceConnection
 from app.schemas.device import DeviceRegisterRequest
+from app.services import identity_service
 
 logger = get_logger(__name__)
 
 
-def register_device(db: DBSession, req: DeviceRegisterRequest) -> tuple[Device, bool]:
+class DeviceRevokedError(Exception):
+    """设备已被吊销：注册返回 403 DEVICE_REVOKED（§17.4 I9）。"""
+
+    def __init__(self, device_id: str) -> None:
+        super().__init__(f"DEVICE_REVOKED: {device_id}")
+        self.device_id = device_id
+
+
+def register_device(
+    db: DBSession,
+    req: DeviceRegisterRequest,
+    source_ip: Optional[str] = None,
+) -> tuple[Device, bool, List[Dict[str, Any]]]:
     """注册设备。重复注册时返回已有设备（幂等），不重复插入。
 
-    返回 (device, created)。
+    返回 (device, created, changes)。``changes`` 为 I2 变更列表（新建为空），
+    API 层据此设置 ``X-Identity-Warning`` 响应头。
     """
     device = db.query(Device).filter(Device.device_id == req.device_id).first()
     if device is not None:
-        logger.info("device %s already registered, return existing", req.device_id)
-        return device, False
+        if device.token_revoked_at is not None:
+            raise DeviceRevokedError(device.device_id)
+        changes = identity_service.compare_registration(device, req, source_ip)
+        if changes:
+            identity_service.apply_snapshot(device, req)
+            device.updated_at = utcnow()
+        identity_service.note_registration(db, device, changes, source_ip)
+        db.commit()
+        db.refresh(device)
+        logger.info(
+            "device %s already registered, changes=%d", req.device_id, len(changes)
+        )
+        return device, False, changes
 
     now = utcnow()
     device = Device(
@@ -41,10 +66,13 @@ def register_device(db: DBSession, req: DeviceRegisterRequest) -> tuple[Device, 
         updated_at=now,
     )
     db.add(device)
+    db.flush()
+    identity_service.record_registration_burst(db, device, source_ip)
+    identity_service.note_registration_ip(device.device_id, source_ip)
     db.commit()
     db.refresh(device)
     logger.info("device %s registered", req.device_id)
-    return device, True
+    return device, True, []
 
 
 def get_device(db: DBSession, device_id: str) -> Optional[Device]:

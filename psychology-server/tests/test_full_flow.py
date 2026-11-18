@@ -92,7 +92,7 @@ def test_02c_heartbeat_wrong_token(client):
 
 
 def test_02d_device_query(client):
-    resp = client.get("/api/v1/devices/atlas_001")
+    resp = client.get("/api/v1/devices/atlas_001", headers=HEADERS())
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "online"
@@ -188,7 +188,12 @@ def test_05b_result_service_function_matches(client):
 
 # ---------- 6. 查询 result ----------
 def test_06_get_result(client):
-    resp = client.get(f"/api/v1/emotion/sessions/{STATE['session_id']}/result")
+    from app.core.config import get_settings
+
+    resp = client.get(
+        f"/api/v1/emotion/sessions/{STATE['session_id']}/result",
+        headers={"X-Api-Key": get_settings().query_api_key},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["session_id"] == STATE["session_id"]
@@ -196,7 +201,12 @@ def test_06_get_result(client):
 
 
 def test_06b_result_of_unknown_session(client):
-    resp = client.get("/api/v1/emotion/sessions/no-such-session/result")
+    from app.core.config import get_settings
+
+    resp = client.get(
+        "/api/v1/emotion/sessions/no-such-session/result",
+        headers={"X-Api-Key": get_settings().query_api_key},
+    )
     assert resp.status_code == 404
 
 
@@ -268,17 +278,41 @@ def test_08_duplicate_upload_idempotent(client):
         db.close()
 
 
-def test_08b_completed_session_rejects_new_upload(client):
+def test_08b_completed_session_accepts_new_batch(client):
+    """P0-5 多批次：已完成会话在补传窗口内接受新批次，记录累加、结果更新。"""
     resp = client.post(
         f"/api/v1/emotion/sessions/{STATE['session_id']}/data",
         json={
-            "client_request_id": "req-20261003-0002",  # 不同的 request id
+            "client_request_id": "req-20261003-0002",  # 不同的 request id = 新批次
             "session_meta": {},
             "timeline": TIMELINE,
         },
         headers=HEADERS(),
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["duplicate"] is False
+    assert resp.json()["result"]["valid_expression_seconds"] == 1.5
+
+    from app.db.database import SessionLocal
+    from app.models.emotion_record import EmotionRecord
+    from app.models.emotion_result import EmotionResult
+
+    db = SessionLocal()
+    try:
+        count = (
+            db.query(EmotionRecord)
+            .filter(EmotionRecord.session_id == STATE["session_id"])
+            .count()
+        )
+        assert count == len(TIMELINE) * 2  # 两批次累加
+        result_rows = (
+            db.query(EmotionResult)
+            .filter(EmotionResult.session_id == STATE["session_id"])
+            .count()
+        )
+        assert result_rows == 1  # UPDATE 同一行，不新增结果行
+    finally:
+        db.close()
 
 
 # ---------- 9. 非法 expression ----------
@@ -361,7 +395,7 @@ def test_12_heartbeat_offline(client, db_session: DBSession):
     device.last_seen = utcnow() - timedelta(seconds=200)
     db_session.commit()
 
-    resp = client.get("/api/v1/devices/atlas_001")
+    resp = client.get("/api/v1/devices/atlas_001", headers=HEADERS())
     assert resp.status_code == 200
     assert resp.json()["status"] == "offline"
 

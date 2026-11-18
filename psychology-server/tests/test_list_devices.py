@@ -1,10 +1,14 @@
-"""列出所有设备接口测试。"""
+"""列出所有设备接口测试（P0-17 起需 X-Api-Key）。"""
 from fastapi.testclient import TestClient
+
+from app.core.config import get_settings
+
+_H = {"X-Api-Key": get_settings().query_api_key}
 
 
 def test_list_devices_returns_registered(client: TestClient):
     dev = "atlas_list_dev"
-    before = client.get("/api/v1/devices")
+    before = client.get("/api/v1/devices", headers=_H)
     assert before.status_code == 200
     existing = {d["device_id"] for d in before.json()}
 
@@ -14,7 +18,7 @@ def test_list_devices_returns_registered(client: TestClient):
     )
     assert r.status_code == 200
 
-    after = client.get("/api/v1/devices")
+    after = client.get("/api/v1/devices", headers=_H)
     assert after.status_code == 200
     items = after.json()
     assert isinstance(items, list)
@@ -27,7 +31,8 @@ def test_list_devices_returns_registered(client: TestClient):
     assert "device_token" not in target
 
 
-def test_list_devices_no_auth_required(client: TestClient):
-    # 无任何请求头即可访问
-    r = client.get("/api/v1/devices")
-    assert r.status_code == 200
+def test_list_devices_requires_api_key(client: TestClient):
+    assert client.get("/api/v1/devices").status_code == 401
+    assert (
+        client.get("/api/v1/devices", headers={"X-Api-Key": "wrong"}).status_code == 401
+    )

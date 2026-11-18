@@ -3,7 +3,12 @@
 核心原则：
 1. 开发板只上传原始 timeline，最终统计结果一律由服务器重新计算；
 2. 算法只封装在本文件，API 路由不写业务逻辑，以后修改算法只改这里。
+3. 多批次累加（P0-5）：每次上传登记 upload_batches，原始记录累加，
+   结果按该会话全部记录重算并 UPDATE 同一行 emotion_results。
 """
+import hashlib
+import json
+import uuid
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
@@ -16,11 +21,13 @@ from app.models.device_emotion_status import DeviceEmotionStatus
 from app.models.emotion_record import EmotionRecord
 from app.models.emotion_result import EmotionResult
 from app.models.session import SessionModel
+from app.models.upload_batch import UploadBatch
 from app.schemas.emotion import (
     DeviceEmotionStatusRequest,
     SessionMeta,
     TimelineItem,
 )
+from app.services import compat
 
 logger = get_logger(__name__)
 
@@ -117,67 +124,207 @@ def compute_result(
     }
 
 
+def _timeline_sha256(timeline: List[TimelineItem]) -> str:
+    payload = [item.model_dump() for item in timeline]
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _recompute_and_upsert(
+    db: DBSession,
+    session: SessionModel,
+    client_request_id: str,
+    session_meta: SessionMeta,
+    now: Any,
+) -> EmotionResult:
+    """按会话**全部**记录重算结果，并更新同一行（P0-5：不新增结果行）。"""
+    records = (
+        db.query(EmotionRecord)
+        .filter(EmotionRecord.session_id == session.session_id)
+        .order_by(EmotionRecord.relative_seconds.asc(), EmotionRecord.id.asc())
+        .all()
+    )
+    items = [
+        TimelineItem(
+            relative_seconds=record.relative_seconds,
+            expression=record.expression,
+            confidence=record.confidence,
+        )
+        for record in records
+    ]
+    computed = compute_result(session_meta, items)
+
+    result = _get_result(db, session.session_id)
+    if result is None:
+        result = EmotionResult(
+            session_id=session.session_id,
+            client_request_id=client_request_id,
+            valid_expression_seconds=computed["valid_expression_seconds"],
+            dominant_expression=computed["dominant_expression"],
+            average_confidence=computed["average_confidence"],
+            face_coverage_percent=computed["face_coverage_percent"],
+            result_json=computed["result_json"],
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(result)
+    else:
+        result.client_request_id = client_request_id
+        result.valid_expression_seconds = computed["valid_expression_seconds"]
+        result.dominant_expression = computed["dominant_expression"]
+        result.average_confidence = computed["average_confidence"]
+        result.face_coverage_percent = computed["face_coverage_percent"]
+        result.result_json = computed["result_json"]
+        result.updated_at = now
+    db.flush()
+    return result
+
+
 def upload_emotion_data(
     db: DBSession,
     session: SessionModel,
     client_request_id: str,
     session_meta: SessionMeta,
     timeline: List[TimelineItem],
-) -> tuple[EmotionResult, bool]:
-    """处理批量上传：幂等（重复请求不重复插入），成功后 session 自动 completed。
+    device_id: Optional[str] = None,
+    app_client_id: Optional[str] = None,
+    protocol_header: Optional[str] = None,
+    stream_id: Optional[str] = None,
+    device_timestamp: Optional[str] = None,
+    monotonic_ms: Optional[int] = None,
+    clock_offset_ms: Optional[int] = None,
+    protocol_version: Optional[str] = None,
+    total_bytes: int = 0,
+) -> tuple[EmotionResult, bool, Dict[str, Any]]:
+    """处理批量上传：批次级幂等、多批次累加、结果重算，成功后 session 自动 completed。
 
-    返回 (result, duplicate)。
+    返回 (result, duplicate, compatibility)，其中 compatibility 用于响应头：
+    ``protocol_version`` / ``inferred`` / ``flags``。
     """
     if len(timeline) == 0:
         raise EmotionBusinessError("timeline is empty", status_code=422)
 
-    existing = _get_result(db, session.session_id)
-    if existing is not None:
-        # 已有结果：仅相同 client_request_id 幂等返回，其余一律拒绝（防重复入库）
-        if existing.client_request_id == client_request_id:
-            return existing, True
+    if session.status == "aborted":
         raise EmotionBusinessError(
-            "session already has data from another request", status_code=409
+            "SESSION_ABORTED: session is aborted, data is not accepted",
+            status_code=409,
         )
 
-    # 尚无结果时，允许为已结束的会话"收尾补传一次"：正常时序是 Atlas 轮询到
-    # 会话 completed/消失后才批量上传；interrupted（心跳超时兜底）同理。
-    # 能走到这里说明该会话从未入库过任何结果，因此接受；一旦已有结果则按
-    # 上面的幂等/409 规则处理，保证不会重复插入。
+    now = utcnow()
+    protocol, inferred = compat.infer_protocol_version(
+        protocol_header, protocol_version
+    )
+    start = session.started_at or session.created_at
+    end = session.ended_at if session.ended_at is not None else now
+    upper_bound = (
+        max((end - start).total_seconds(), 0.0)
+        + compat.UPPER_BOUND_MARGIN_SECONDS
+    )
+
+    # 批次级兼容信息（用于响应头）
+    _, _, effective_stream, batch_flags = compat.derive_record_quality(
+        protocol_version=protocol,
+        stream_id=stream_id,
+        device_timestamp=device_timestamp,
+        monotonic_ms=monotonic_ms,
+        frame_index=None,
+        clock_offset_ms=clock_offset_ms,
+        relative_seconds=0.0,
+        upper_bound_seconds=upper_bound,
+        server_received_at=now,
+    )
+    compatibility = {
+        "protocol_version": protocol,
+        "inferred": inferred,
+        "flags": batch_flags,
+        "stream_id": effective_stream,
+    }
+
+    # 批次级幂等：同一 (session_id, client_request_id) 只入库一次
+    batch = (
+        db.query(UploadBatch)
+        .filter(
+            UploadBatch.session_id == session.session_id,
+            UploadBatch.client_request_id == client_request_id,
+        )
+        .first()
+    )
+    if batch is not None:
+        result = _get_result(db, session.session_id)
+        if result is None:
+            result = _recompute_and_upsert(
+                db, session, client_request_id, session_meta, now
+            )
+            db.commit()
+            db.refresh(result)
+        return result, True, compatibility
+
+    # 已收尾的会话仅在补传窗口内接受（P0-1/P0-5）
     if session.status in ("completed", "interrupted"):
+        deadline = session.late_upload_deadline
+        if deadline is None or now > deadline:
+            raise EmotionBusinessError(
+                "LATE_UPLOAD_EXPIRED: late upload window has expired",
+                status_code=409,
+            )
         logger.info(
             "late emotion upload accepted: session=%s previous_status=%s",
             session.session_id,
             session.status,
         )
 
-    computed = compute_result(session_meta, timeline)
-    now = utcnow()
-
-    db.add_all(
-        [
+    records = []
+    for item in timeline:
+        quality, quality_info, _, _ = compat.derive_record_quality(
+            protocol_version=protocol,
+            stream_id=stream_id,
+            device_timestamp=device_timestamp,
+            monotonic_ms=monotonic_ms,
+            frame_index=item.frame_index,
+            clock_offset_ms=clock_offset_ms,
+            relative_seconds=item.relative_seconds,
+            upper_bound_seconds=upper_bound,
+            server_received_at=now,
+        )
+        records.append(
             EmotionRecord(
                 session_id=session.session_id,
+                device_id=device_id or session.device_id,
+                stream_id=effective_stream,
                 relative_seconds=item.relative_seconds,
                 expression=item.expression,
                 confidence=item.confidence,
                 created_at=now,
+                device_timestamp=device_timestamp,
+                monotonic_ms=monotonic_ms,
+                clock_offset_ms=clock_offset_ms,
+                frame_index=item.frame_index,
+                quality=quality,
+                quality_info=quality_info,
+                protocol_version=protocol,
             )
-            for item in timeline
-        ]
+        )
+    db.add_all(records)
+    db.add(
+        UploadBatch(
+            upload_id="up_" + uuid.uuid4().hex,
+            session_id=session.session_id,
+            device_id=device_id or session.device_id,
+            app_client_id=app_client_id,
+            client_request_id=client_request_id,
+            batch_type="emotion",
+            status="received",
+            item_count=len(timeline),
+            total_bytes=total_bytes,
+            sha256=_timeline_sha256(timeline),
+            received_at=now,
+            created_at=now,
+            updated_at=now,
+        )
     )
-    result = EmotionResult(
-        session_id=session.session_id,
-        client_request_id=client_request_id,
-        valid_expression_seconds=computed["valid_expression_seconds"],
-        dominant_expression=computed["dominant_expression"],
-        average_confidence=computed["average_confidence"],
-        face_coverage_percent=computed["face_coverage_percent"],
-        result_json=computed["result_json"],
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(result)
+    db.flush()
+
+    result = _recompute_and_upsert(db, session, client_request_id, session_meta, now)
 
     # 上传完成即视为该次测评结束
     if session.started_at is None:
@@ -190,12 +337,13 @@ def upload_emotion_data(
     db.commit()
     db.refresh(result)
     logger.info(
-        "emotion data uploaded: session=%s records=%d dominant=%s",
+        "emotion batch uploaded: session=%s batch_records=%d dominant=%s protocol=%s",
         session.session_id,
         len(timeline),
         result.dominant_expression,
+        protocol,
     )
-    return result, False
+    return result, False, compatibility
 
 
 def get_result(db: DBSession, session_id: str) -> Optional[EmotionResult]:
