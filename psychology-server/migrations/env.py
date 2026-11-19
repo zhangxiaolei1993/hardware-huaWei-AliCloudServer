@@ -18,6 +18,7 @@ from app.models import (  # noqa: F401,E402
     device_emotion_status,
     emotion_record,
     emotion_result,
+    emotion_result_version,
     external_result_snapshot,
     session,
     session_device,

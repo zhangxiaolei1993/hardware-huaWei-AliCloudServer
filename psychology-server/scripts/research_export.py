@@ -165,6 +165,22 @@ _COLUMNS: Dict[str, Tuple[str, List[Tuple[str, str]]]] = {
             ("updated_at", "结果更新时间 UTC"),
         ],
     ),
+    "emotion_result_versions": (
+        "derived",
+        [
+            ("session_id", "会话号 S1"),
+            ("result_id", "对应 emotion_results.id"),
+            ("version", "会话内版本号（从 1 单调递增）"),
+            ("algorithm_version", "算法口径版本"),
+            ("status", "版本状态（generated/superseded）"),
+            ("trigger_source", "触发来源（first_import/recompute/manual_recompute/backfill）"),
+            ("source_record_count", "生成时源记录数"),
+            ("source_sha256", "生成时源数据 sha256（可回溯当时的原始记录）"),
+            ("result_json", "该版本完整结果快照"),
+            ("generated_at", "版本生成时间 UTC"),
+            ("created_at", "入库时间 UTC"),
+        ],
+    ),
     "external_result_snapshots": (
         "derived",
         [
@@ -230,7 +246,7 @@ BANNED_OUTPUT_KEYS = {
 _DATA_TYPES = {
     "timeline": ["timeline_events"],
     "emotion": ["emotion_records"],
-    "results": ["emotion_results"],
+    "results": ["emotion_results", "emotion_result_versions"],
     "snapshots": ["external_result_snapshots"],
     "batches": ["upload_batches"],
 }
@@ -256,6 +272,7 @@ _DT_COLUMNS = {
     "bound_at",
     "unbound_at",
     "received_at",
+    "generated_at",
 }
 
 
@@ -736,6 +753,10 @@ def export_session(
         table for dtype in data_types for table in _DATA_TYPES[dtype]
     ]
     tables = list(dict.fromkeys(tables))
+    # 兼容未执行 P1-D 迁移的旧库副本：缺表则跳过，并在根 manifest 的
+    # missing_tables 中体现，不中断整次导出。
+    existing_tables = _table_names(conn)
+    tables = [table for table in tables if table in existing_tables]
 
     exported: Dict[str, List[Dict[str, Any]]] = {}
     dropped: Dict[str, int] = {}

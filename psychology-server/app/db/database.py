@@ -48,6 +48,7 @@ def init_db() -> None:
         device_emotion_status,
         emotion_record,
         emotion_result,
+        emotion_result_version,
         session,
     )
 

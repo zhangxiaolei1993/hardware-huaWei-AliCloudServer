@@ -13,6 +13,7 @@ from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
@@ -21,6 +22,7 @@ from app.db.database import utcnow
 from app.models.device_emotion_status import DeviceEmotionStatus
 from app.models.emotion_record import EmotionRecord
 from app.models.emotion_result import EmotionResult
+from app.models.emotion_result_version import EmotionResultVersion
 from app.models.session import SessionModel
 from app.models.upload_batch import UploadBatch
 from app.schemas.emotion import (
@@ -31,6 +33,9 @@ from app.schemas.emotion import (
 from app.services import compat
 
 logger = get_logger(__name__)
+
+#: 结果版本表中的算法口径标识；算法调整时递增以区分历史版本
+EMOTION_ALGORITHM_VERSION = "emo_v1"
 
 
 class EmotionBusinessError(Exception):
@@ -154,17 +159,13 @@ def _timeline_sha256(timeline: List[TimelineItem]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _recompute_and_upsert(
-    db: DBSession,
-    session: SessionModel,
-    client_request_id: str,
-    session_meta: SessionMeta,
-    now: Any,
-) -> EmotionResult:
-    """按会话**全部**记录重算结果，并更新同一行（P0-5：不新增结果行）。"""
+def _load_session_timeline(
+    db: DBSession, session_id: str
+) -> tuple[List[EmotionRecord], List[TimelineItem]]:
+    """按确定性顺序读取会话全部原始记录，构造重算输入（只读）。"""
     records = (
         db.query(EmotionRecord)
-        .filter(EmotionRecord.session_id == session.session_id)
+        .filter(EmotionRecord.session_id == session_id)
         .order_by(EmotionRecord.relative_seconds.asc(), EmotionRecord.id.asc())
         .all()
     )
@@ -176,6 +177,65 @@ def _recompute_and_upsert(
         )
         for record in records
     ]
+    return records, items
+
+
+def source_timeline_fingerprint(db: DBSession, session_id: str) -> tuple[int, str]:
+    """返回 (源记录数, 源数据 sha256)，用于版本追溯与幂等回填。"""
+    records, items = _load_session_timeline(db, session_id)
+    return len(records), _timeline_sha256(items)
+
+
+def _append_result_version(
+    db: DBSession,
+    result: EmotionResult,
+    trigger_source: str,
+    now: Any,
+    source_record_count: int,
+    source_sha256: str,
+) -> EmotionResultVersion:
+    """追加一条结果版本：旧版本标 superseded，版本号在同一会话内 +1。
+
+    并发保护依赖 ``UNIQUE(session_id, version)``：SQLite 写事务串行，
+    冲突时整个事务回滚，不会产生重复版本号。
+    """
+    db.query(EmotionResultVersion).filter(
+        EmotionResultVersion.session_id == result.session_id,
+        EmotionResultVersion.status == "generated",
+    ).update({"status": "superseded"}, synchronize_session=False)
+    current = (
+        db.query(func.max(EmotionResultVersion.version))
+        .filter(EmotionResultVersion.session_id == result.session_id)
+        .scalar()
+    )
+    version = EmotionResultVersion(
+        session_id=result.session_id,
+        result_id=result.id,
+        version=int(current or 0) + 1,
+        algorithm_version=EMOTION_ALGORITHM_VERSION,
+        status="generated",
+        trigger_source=trigger_source,
+        source_record_count=source_record_count,
+        source_sha256=source_sha256,
+        result_json=result.result_json,
+        generated_at=now,
+        created_at=now,
+    )
+    db.add(version)
+    db.flush()
+    return version
+
+
+def _recompute_and_upsert(
+    db: DBSession,
+    session: SessionModel,
+    client_request_id: str,
+    session_meta: SessionMeta,
+    now: Any,
+    trigger_source: Optional[str] = None,
+) -> EmotionResult:
+    """按会话**全部**记录重算结果，更新同一行并追加一条版本（P0-5/P1-D）。"""
+    records, items = _load_session_timeline(db, session.session_id)
     computed = compute_result(session_meta, items)
 
     result = _get_result(db, session.session_id)
@@ -201,6 +261,71 @@ def _recompute_and_upsert(
         result.result_json = computed["result_json"]
         result.updated_at = now
     db.flush()
+
+    has_version = (
+        db.query(EmotionResultVersion.id)
+        .filter(EmotionResultVersion.session_id == session.session_id)
+        .first()
+        is not None
+    )
+    _append_result_version(
+        db,
+        result,
+        trigger_source or ("recompute" if has_version else "first_import"),
+        now,
+        len(records),
+        _timeline_sha256(items),
+    )
+    return result
+
+
+def _session_meta_from_result(result: Optional[EmotionResult]) -> SessionMeta:
+    """从当前结果中还原生成参数（原始终端元信息未单独入库）。"""
+    if result is None or not isinstance(result.result_json, dict):
+        return SessionMeta()
+    payload = result.result_json
+    quality = payload.get("quality") or {}
+    return SessionMeta(
+        session_start=payload.get("session_start"),
+        session_end=payload.get("session_end"),
+        elapsed_seconds=quality.get("elapsed_seconds"),
+        video_frames=quality.get("video_frames"),
+        display_fps=quality.get("display_fps"),
+        face_detected_frames=quality.get("face_detected_frames"),
+        inference_runs=quality.get("inference_runs"),
+    )
+
+
+def recompute_emotion_result(
+    db: DBSession, session: SessionModel, trigger_source: str = "manual_recompute"
+) -> EmotionResult:
+    """基于原始记录重算并追加新版本；原始记录只读。
+
+    - 只向 ``emotion_result_versions`` 追加一行，并把上一条标为 superseded；
+    - ``emotion_results`` 仍只保留当前值（不改其结构与唯一约束）；
+    - 提交在本函数内完成。
+    """
+    existing = _get_result(db, session.session_id)
+    client_request_id = (
+        existing.client_request_id
+        if existing is not None
+        else f"recompute:{session.session_id}"
+    )
+    result = _recompute_and_upsert(
+        db,
+        session,
+        client_request_id,
+        _session_meta_from_result(existing),
+        utcnow(),
+        trigger_source=trigger_source,
+    )
+    db.commit()
+    db.refresh(result)
+    logger.info(
+        "emotion result recomputed: session=%s trigger=%s",
+        session.session_id,
+        trigger_source,
+    )
     return result
 
 

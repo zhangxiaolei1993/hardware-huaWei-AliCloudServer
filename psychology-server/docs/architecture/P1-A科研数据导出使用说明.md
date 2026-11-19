@@ -64,6 +64,7 @@ exports/research/research_export_<ts>/
     │   └── emotion_records.csv|jsonl
     ├── derived/             # 分析结果（服务端计算/外部量表结果）
     │   ├── emotion_results.csv|jsonl
+    │   ├── emotion_result_versions.csv|jsonl  # P1-D 结果版本历史（旧库副本缺表则跳过）
     │   └── external_result_snapshots.csv|jsonl
     ├── quality_report.json  # 本会话质量报告
     └── manifest.json        # 本会话文件清单（sha256/行数）
