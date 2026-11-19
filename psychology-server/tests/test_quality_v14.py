@@ -11,6 +11,8 @@ import uuid
 
 from app.db.database import SessionLocal
 from app.models.emotion_record import EmotionRecord
+from app.schemas.emotion import SessionMeta, TimelineItem
+from app.services.emotion_service import compute_result
 
 DEV = "atlas_quality_dev"
 STATE: dict = {}
@@ -194,3 +196,37 @@ def test_07_v1_upload_path_unchanged(client):
     resp = _upload(client, sid, {})
     assert resp.status_code == 200
     assert set(resp.json().keys()) >= {"session_id", "session_status", "duplicate", "result"}
+
+
+def test_08_result_json_session_times_are_tz_aware():
+    """无时区值按设备本地时区(UTC+8)解释，带偏移值按其偏移转换，统一输出 UTC。"""
+    timeline = [
+        TimelineItem(relative_seconds=0.0, expression="neutral", confidence=0.9),
+        TimelineItem(relative_seconds=1.0, expression="neutral", confidence=0.9),
+    ]
+    meta = SessionMeta(
+        session_start="2026-11-18T12:00:00",
+        session_end="2026-11-18T20:00:00+08:00",
+    )
+    result = compute_result(meta, timeline)["result_json"]
+    # 无时区 12:00 视为北京时间 → 04:00Z
+    assert result["session_start"] == "2026-11-18T04:00:00+00:00"
+    assert result["session_end"] == "2026-11-18T12:00:00+00:00"
+
+    # 生产实测样例：设备本地 21:50:25 → 13:50:25Z
+    local = SessionMeta(session_start="2026-11-18T21:50:25")
+    assert (
+        compute_result(local, timeline)["result_json"]["session_start"]
+        == "2026-11-18T13:50:25+00:00"
+    )
+
+    utc = SessionMeta(session_start="2026-11-18T12:00:00Z")
+    assert (
+        compute_result(utc, timeline)["result_json"]["session_start"]
+        == "2026-11-18T12:00:00+00:00"
+    )
+
+    # 无法解析的值原样保留，不伪造时间
+    bad = SessionMeta(session_start="not-a-time")
+    assert compute_result(bad, timeline)["result_json"]["session_start"] == "not-a-time"
+

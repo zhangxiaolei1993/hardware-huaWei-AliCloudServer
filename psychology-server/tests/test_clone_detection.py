@@ -122,3 +122,29 @@ def test_single_device_ip_never_warns(client):
             == 200
         )
     assert _clone_events(DEV2) == []
+
+
+def test_loopback_ips_do_not_participate_in_diversity(client):
+    """本机部署/本地代理产生的 loopback 不制造 IP 多样性，也不进审计 detail。"""
+    dev = "atlas_clone_loopback_dev"
+    _register(client, dev)
+    for ip in ("127.0.0.1", "127.0.0.2", "::1", "::ffff:127.0.0.1"):
+        assert (
+            client.post(
+                f"/api/v1/devices/{dev}/heartbeat", json={}, headers=_headers(dev, ip)
+            ).status_code
+            == 200
+        )
+    assert _clone_events(dev) == []
+
+    # 真实双 IP 仍触发，且 detail 中不含 loopback
+    client.post(
+        f"/api/v1/devices/{dev}/heartbeat", json={}, headers=_headers(dev, "198.51.100.7")
+    )
+    client.post(
+        f"/api/v1/devices/{dev}/heartbeat", json={}, headers=_headers(dev, "198.51.100.8")
+    )
+    events = _clone_events(dev)
+    assert len(events) == 1
+    assert set(events[0].detail["ips"]) == {"198.51.100.7", "198.51.100.8"}
+

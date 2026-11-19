@@ -10,6 +10,7 @@ import hashlib
 import json
 import uuid
 from collections import OrderedDict
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session as DBSession
@@ -63,6 +64,29 @@ def compute_durations(timeline: List[TimelineItem]) -> Dict[str, float]:
     return {k: round(v, 3) for k, v in durations.items()}
 
 
+# 设备/业务侧上报的无时区时间按中国标准时间解释（UTC+8，无夏令时）。
+# 不能假设它是 UTC：Flutter 端当前发送的是设备本地时间，如 "2026-11-18T21:50:25"。
+_DEVICE_LOCAL_TZ = timezone(timedelta(hours=8), "Asia/Shanghai")
+
+
+def _normalize_iso8601(value: Optional[str]) -> Optional[str]:
+    """把 session_start/end 统一为带时区的 ISO 8601（UTC）。
+
+    带偏移的值按原偏移转换；无时区字符串按设备本地时区（UTC+8）解释后
+    再转 UTC，避免把本地时间误标成 UTC；无法解析时原样保留，不伪造时间。
+    """
+    if not value:
+        return value
+    text = value.strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_DEVICE_LOCAL_TZ)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 def compute_result(
     session_meta: SessionMeta, timeline: List[TimelineItem]
 ) -> Dict[str, Any]:
@@ -111,9 +135,9 @@ def compute_result(
         },
     }
     if session_meta.session_start:
-        result_json["session_start"] = session_meta.session_start
+        result_json["session_start"] = _normalize_iso8601(session_meta.session_start)
     if session_meta.session_end:
-        result_json["session_end"] = session_meta.session_end
+        result_json["session_end"] = _normalize_iso8601(session_meta.session_end)
 
     return {
         "valid_expression_seconds": total_valid,

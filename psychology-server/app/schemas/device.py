@@ -79,7 +79,31 @@ class DeviceConnectResponse(BaseModel):
 
 
 class DeviceDisconnectRequest(BaseModel):
-    connection_id: str = Field(min_length=8, max_length=64)
+    """手机断开设备。
+
+    `connection_id` 与 `app_client_id` 至少提供一个：
+    - 提供 `connection_id`：精确定位连接（原有方式，保持兼容）
+    - 未提供 `connection_id`：按 `device_id` + `app_client_id`(+`user_id`)
+      解析当前 `connected` 连接并关闭
+    """
+
+    connection_id: Optional[str] = Field(
+        default=None,
+        min_length=8,
+        max_length=64,
+        description="connect 返回的连接 ID；提供时优先按它关闭",
+    )
+    app_client_id: Optional[str] = Field(
+        default=None,
+        min_length=8,
+        max_length=128,
+        description="手机端安装实例 ID；未传 connection_id 时用它解析活跃连接",
+    )
+    user_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="可选，传入时作为解析活跃连接的附加过滤条件",
+    )
 
 
 class DeviceDisconnectResponse(BaseModel):

@@ -74,7 +74,7 @@ class TimelineEventIn(BaseModel):
     event_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$", max_length=32)
     event_type: EventType
     occurred_at: datetime
-    relative_seconds: float = Field(ge=-5.0, description="相对锚点秒数，允许 -5s 容差")
+    relative_seconds: float = Field(ge=-60.0, description="相对锚点秒数，允许 -60s 首题前锚缓冲")
     device_id: Optional[str] = Field(default=None, max_length=64)
     stream_id: Optional[str] = Field(default=None, max_length=40)
     device_timestamp: Optional[str] = Field(default=None, max_length=40)

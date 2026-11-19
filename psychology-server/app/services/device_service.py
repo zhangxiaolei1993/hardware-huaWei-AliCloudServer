@@ -176,15 +176,10 @@ def connect_device(
     return connection
 
 
-def disconnect_device(db: DBSession, connection_id: str) -> Optional[DeviceConnection]:
-    """断开连接。记录不存在返回 None；已断开则幂等返回。"""
-    connection = (
-        db.query(DeviceConnection)
-        .filter(DeviceConnection.connection_id == connection_id)
-        .first()
-    )
-    if connection is None:
-        return None
+def _close_connection(
+    db: DBSession, connection: DeviceConnection
+) -> DeviceConnection:
+    """把连接置为 disconnected；已断开则幂等返回（不重复提交）。"""
     if connection.status == "disconnected":
         return connection
 
@@ -194,5 +189,57 @@ def disconnect_device(db: DBSession, connection_id: str) -> Optional[DeviceConne
     connection.updated_at = now
     db.commit()
     db.refresh(connection)
-    logger.info("connection %s disconnected at %s", connection_id, now.isoformat())
+    logger.info(
+        "connection %s disconnected at %s", connection.connection_id, now.isoformat()
+    )
     return connection
+
+
+def disconnect_device(db: DBSession, connection_id: str) -> Optional[DeviceConnection]:
+    """按 connection_id 断开连接。记录不存在返回 None；已断开则幂等返回。"""
+    connection = get_connection(db, connection_id)
+    if connection is None:
+        return None
+    return _close_connection(db, connection)
+
+
+def find_connection_by_app(
+    db: DBSession,
+    device_id: str,
+    app_client_id: str,
+    user_id: Optional[str] = None,
+    active_only: bool = True,
+) -> Optional[DeviceConnection]:
+    """按 device_id + app_client_id(+user_id) 查最近一条连接记录。"""
+    query = db.query(DeviceConnection).filter(
+        DeviceConnection.device_id == device_id,
+        DeviceConnection.app_client_id == app_client_id,
+    )
+    if active_only:
+        query = query.filter(DeviceConnection.status == "connected")
+    if user_id:
+        query = query.filter(DeviceConnection.user_id == user_id)
+    return query.order_by(DeviceConnection.id.desc()).first()
+
+
+def disconnect_by_app_client(
+    db: DBSession,
+    device_id: str,
+    app_client_id: str,
+    user_id: Optional[str] = None,
+) -> Optional[DeviceConnection]:
+    """按 device_id + app_client_id(+user_id) 关闭当前活跃连接。
+
+    无活跃连接时回退到最近一条历史记录（已断开则幂等返回同一 connection_id）；
+    该设备下完全没有此 app_client_id 的记录时返回 None。
+    """
+    connection = find_connection_by_app(
+        db, device_id, app_client_id, user_id, active_only=True
+    )
+    if connection is None:
+        connection = find_connection_by_app(
+            db, device_id, app_client_id, user_id, active_only=False
+        )
+    if connection is None:
+        return None
+    return _close_connection(db, connection)

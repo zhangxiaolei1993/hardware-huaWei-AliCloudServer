@@ -11,6 +11,8 @@ if os.path.exists(_TEST_DB_PATH):
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 os.environ["LOG_FILE"] = os.path.join(tempfile.gettempdir(), "psychology_test.log")
 os.environ["EXPORT_DIR"] = os.path.join(tempfile.gettempdir(), "psychology_exports_test")
+# 测试库由 create_all 建表，没有 alembic_version，跳过启动版本断言
+os.environ["SKIP_MIGRATION_CHECK"] = "true"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

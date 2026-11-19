@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # 数据库：SQLite（第一阶段默认）；有 MySQL 时切换 DATABASE_URL 即可
     database_url: str = "sqlite:///./psychology.db"
 
+    # 启动时校验 alembic_version == 代码 head（默认开启）；仅测试/离线工具可关闭
+    skip_migration_check: bool = False
+
     secret_key: str = "change-me-to-a-random-string"
 
     # 设备管理接口密钥（X-App-Key，§17.4 I5/I9）；生产必须在 .env 覆盖

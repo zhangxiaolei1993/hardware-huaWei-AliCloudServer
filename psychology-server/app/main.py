@@ -22,7 +22,8 @@ from app.api.docs_page import router as docs_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
 from app.core.reaper import SessionReaper
-from app.db.database import init_db
+from app.db.database import engine, init_db
+from app.db.migration_check import assert_migration_head
 
 setup_logging()
 logger = get_logger(__name__)
@@ -58,6 +59,11 @@ OPENAPI_TAGS: List[Dict[str, str]] = [
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    # 先断言库版本 == 代码 head，避免「代码新、库旧」带病启动（在任何建表/服务前）
+    if settings.skip_migration_check:
+        logger.warning("migration version check skipped (SKIP_MIGRATION_CHECK=true)")
+    else:
+        assert_migration_head(engine)
     init_db()
     reaper = SessionReaper()
     reaper.start()

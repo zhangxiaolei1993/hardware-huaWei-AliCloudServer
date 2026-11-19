@@ -86,7 +86,7 @@ X-Device-Token: &lt;注册时返回的 token&gt;</code></pre>
       <tr><td>GET</td><td><code>/api/v1/devices/{device_id}/active-session</code></td><td>查询设备当前活跃会话（免认证，Atlas 轮询获取 session_id）</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/heartbeat</code></td><td>心跳，每 20 秒一次</td></tr>
       <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/connect</code></td><td>手机连接设备（无需设备 token）</td></tr>
-      <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/disconnect</code></td><td>手机断开设备</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/devices/{device_id}/disconnect</code></td><td>手机断开设备（可只带 <code>app_client_id</code>，也可带 <code>connection_id</code>）</td></tr>
       <tr><td>POST</td><td><code>/api/v1/sessions</code></td><td>创建测评会话（设备必须在线，否则 409）</td></tr>
       <tr><td>GET</td><td><code>/api/v1/sessions/{session_id}</code></td><td>查询会话</td></tr>
       <tr><td>POST</td><td><code>/api/v1/sessions/{session_id}/status</code></td><td>状态流转：running / completed（免认证，手机可直接收尾）</td></tr>

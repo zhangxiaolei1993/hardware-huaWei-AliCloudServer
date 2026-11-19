@@ -1157,7 +1157,7 @@ gantt
 **硬规则**
 
 1. **不得用 `server_received_at` 代替真实采集时间。** 现有 `emotion_records.created_at` 正是犯了这个错——它是入库时间，标签却像采集时间。
-2. `relative_seconds` **只能由产生方计算**，服务器只做合法性校验（允许 5 s 负值容差、上界、单调），不重算。
+2. `relative_seconds` **只能由产生方计算**，服务器只做合法性校验（允许 60 s 首题前锚缓冲、上界、单调），不重算。
 3. 墙钟可能被 NTP 跳变，因此 `relative_seconds` 的基准必须是**单调时钟**，不是墙钟。
 
 **能力分层（v1.2 新增；禁止把目标态写成设备现状）**
@@ -1275,7 +1275,7 @@ upper_bound = session_elapsed + 600
 
 | 校验 | 规则 | 违规响应 | 层级 |
 | --- | --- | --- | --- |
-| 非负容差 | `relative_seconds >= -5.0` | 超出 → 422 `INVALID_TIMELINE` | L1 |
+| 负值容差 | `relative_seconds >= -60.0`（仅 timeline 事件） | 超出 → 422 `INVALID_TIMELINE` | L1 |
 | 上界 | `relative_seconds <= session_elapsed + 600` | **超出照常接收**，追加 `flags += ["out_of_range"]`；**绝不 422** | L2 |
 | 单调性 | 同一批次内允许乱序，但排序后不得有**严格重复**时间戳（同一毫秒多条需显式 `frame_index`） | 422 `DUPLICATE_TIMESTAMP` | L1 |
 | 未来时间 | `occurred_at` 不得晚于 `server_received_at + 60s` | 422 `CLOCK_SKEW_TOO_LARGE` | L1 |
@@ -1286,11 +1286,12 @@ upper_bound = session_elapsed + 600
 > 上界本来就是「可疑」而非「不可能」（reaper 提前中断、设备采集超出服务器判定时长都会触发），因此归入 L2。
 > v1.1 在 §8.4 写 300s 且 422、在 §8.5 写 600s 且标记，两者对同一条数据给出相反结论——v1.2 统一为上表；除本段历史说明与附录 C 变更记录外，全文不再出现 300s 规则。
 
-**负值容差（D10 已定：`-5.0`）**
+**负值容差（D10 已定：`-60.0`，首题前锚缓冲）**
 
-> **为什么允许 `-5 s`**：客户端可能在调用 `POST /sessions` **之前**就已开始产生事件（用户点开题目、设备开始录音），事件时间会早于服务器 `started_at`。
-> 若强制 `>= 0`，这些真实事件会被整批拒绝，反而丢失数据。
-> 规则：`-5 ≤ relative_seconds < 0` 的条目照常入库并追加 `flags += ["pre_anchor"]`；`< -5` 说明锚点本身错了，属 L1，直接 422。
+> **为什么放宽到 `-60 s`**：S1 在客户端进入对话时才创建，而首题的展示、TTS 与语音开始可能早于该锚点数十秒（实测首题 TTS 早于 S1 约 21 s）。
+> `-5 s` 会把真实的首题事件整批拒绝，导致首题 `question_shown` 等事件缺失；`-60 s` 覆盖「首题前锚缓冲」，同时仍能识别明显错误的锚点。
+> 规则：`-60 ≤ relative_seconds < 0` 的条目照常入库、时间按真值保留并追加 `flags += ["pre_anchor"]`；`< -60` 说明锚点本身错了，属 L1，直接 422。
+> 该放宽**只适用于 timeline 事件**；表情记录 `emotion_records` 的 `relative_seconds` 仍按原 `-5.0` 校验，不受影响。
 
 **三种边界场景的处理（v1.2 明确）**
 
@@ -1354,7 +1355,7 @@ upper_bound = session_elapsed + 600
 
 | `flags` | 含义 | 写入时机 |
 | --- | --- | --- |
-| `pre_anchor` | `relative_seconds ∈ [-5,0)` | 入库计算 |
+| `pre_anchor` | `relative_seconds ∈ [-60,0)`（timeline 事件） | 入库计算 |
 | `clock_jump` | 墙钟倒退或跳变 | 入库 / 心跳比对 |
 | `out_of_range` | `relative_seconds > session_elapsed + 600`（**只标记，不拒绝**） | 入库 |
 | `clock_skew` | `abs(clock_offset_ms) > 300000` | 入库 / 心跳 |
@@ -1805,6 +1806,8 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | `created_at` / `updated_at` | DATETIME | NOT NULL | |
 
 `UNIQUE(session_id, device_id)`；`INDEX(device_id, status)`
+
+> **状态语义（有意设计）**：会话结束/完成后，`session_devices.status` 仍保持 `bound`，不主动置为 `unbound`。原因是迟到上传（`late_upload_deadline` 内）以 `status == "bound"` 作为放行条件；若在会话结束时置 `unbound`，迟到批次会被 `403 DEVICE_NOT_BOUND` 卡死。`unbound` 仅在显式解绑（会话进行中换设备或人工解绑）时写入。
 
 **`device_status_logs`**
 
@@ -2350,7 +2353,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | 方法/URL | `POST /sessions/{session_id}/events` |
 | 认证 | `X-App-Key`（Flutter）或设备 token |
 | 幂等 | `UNIQUE(session_id, source, event_id)`；批次内重复的 `event_id` 只入一次并在响应里报 `skipped` |
-| 校验 | `event_type` ∈ 13 类白名单；含 `answer_value` 等禁字段 → `422 FORBIDDEN_FIELD`；`relative_seconds` ≥ -5.0；`occurred_at` ≤ `server_received_at + 60s`；单批 ≤ 2000 条 |
+| 校验 | `event_type` ∈ 13 类白名单；含 `answer_value` 等禁字段 → `422 FORBIDDEN_FIELD`；`relative_seconds` ≥ -60.0（首题前锚缓冲）；`occurred_at` ≤ `server_received_at + 60s`；单批 ≤ 2000 条 |
 | 会话状态 | `created`/`running` 全接受；`completed`/`interrupted` 仅在补传窗口内接受；`aborted` → `409 SESSION_ABORTED` |
 
 请求
@@ -3047,16 +3050,40 @@ X-App-Key: app_k_7f2a...
 **幂等键固定公式（D2 定稿；v1.2 改为以 S1 为作用域）**
 
 ```text
-idempotency_key = "res:{session_id}:{questionnaire_code}:v{result_version}"
+idempotency_key = "res:{S1}:{code}:v{n}"
 ```
+
+> **最终契约（v1.4 明确）**：`res:{S1}:{code}:v{n}`。其中 `S1` = 本平台 `sessions.session_id`（32 hex），`code` = `questionnaire_code` 文本，`n` = `result_version`。
+> 可读示例：`res:206e2b1123c04744945436c0a911d7dd:22:v1`。
+> 旧示例 `res:xin_tan_tan:1742:22:v1` 是 v1.1 的历史写法（把 `source_system` 与 N1 放进键），**v1.4 起作废，不得再用于新请求**。
 
 - 三段值分别取自**路径参数 `session_id`（S1）** 与请求体 `questionnaire_code` / `result_version`，服务端**重新拼接并与请求值逐字比对**，不一致 → 422 `IDEMPOTENCY_KEY_MALFORMED`。
 - **为什么把 N1 移出键**：同一 N1 可能有多个 S1（重新采集），结果必须落到**具体那一次采集**。若键里只有 N1，第二次采集的结果会被判为重复而丢失，或反过来覆盖第一次的结果。
-- `external_session_id`（N1）仍作为**普通列**保存在快照上（可追溯、可导出），但**不参与幂等、不用于推断归属**。
+- `external_session_id`（N1）是**业务侧会话 ID**，仍作为**普通列**保存在快照上（可追溯、可导出），但**不参与结果幂等键作用域、不参与唯一约束、不用于推断归属**。
 - 目的：杜绝客户端用随机 UUID 做幂等键导致「重试变成新记录」，也杜绝不同量表互相覆盖。
 - **整数规范化（真实样本新增约束；v1.4 修正来源）**：客户端取到的 `scale_id` 为 `int`（实测 `22`）并**由客户端文本化上报**，入键前必须按「十进制整数、无前导零、无小数点」转字符串；`22.0`、`022`、带空格的写法一律 422 `IDEMPOTENCY_KEY_MALFORMED`。`session_id` 为平台生成的 32 hex，不涉及数值规范化。
   - **风险提示（v1.4 新增）**：`questionnaire_code` 直接参与幂等键。若 B 侧量表 ID 发生变更或跨版本不唯一，同一份结果会生成新键而**重复入库**。因此该字段的稳定性属 **P0 集成前置确认项**（§23.3 X-6）；确认前按现状使用，但不得在验收材料中声称编码永久稳定。
 - 若请求体带了 `external_session_id` 但与路径 S1 的记录不一致 → 422 `RESULT_SESSION_MISMATCH`（不静默改挂）。
+
+**客户端 / 服务端 / 文档三方一致性（v1.4 补充）**
+
+| 角色 | 实现位置 | 约定 |
+| --- | --- | --- |
+| Flutter 客户端 | 结果同步队列 | 用**创建会话响应返回的 S1** 拼 `res:{S1}:{scale_id}:v{version}`；不得改用 N1、`source_system` 或随机 UUID |
+| 服务端 A | `result_service._check_idempotency_key` | 用路径 `session_id` + 请求体 `questionnaire_code`/`result_version` 重新拼接并与 `idempotency_key` 逐字比对，不符 422 |
+| 文档 | 本节（§14.4） | 公式与示例与上述两处保持一致；N1 仅作普通列保存 |
+
+> 本次修订**只统一文档口径**：服务端与客户端现有 S1 作用域实现保持不变，不改代码、不改历史快照、不重建库、不清理历史数据。
+
+**幂等验证点（契约核对）**
+
+| 场景 | 期望 |
+| --- | --- |
+| 同 S1 + 同 `code` + 同 `n` 重复提交 | `200 {duplicate:true}`，不新增快照 |
+| 不同 S1 + 同 `code` + 同 `n` | 各自保存为独立快照，互不覆盖（AC-34） |
+| 同 S1 + 同 `code` + 不同 `n` | 按既有规则新增版本，`supersedes_snapshot_id` 指向上一版 |
+| 已通过验证的历史快照 | 保持原样，不回填、不修改、不清理 |
+
 
 **唯一约束（两张表各一条，缺一不可）**
 
@@ -4236,13 +4263,14 @@ sqlite3 /opt/backup/psychology-YYYYmmdd-HHMMSS.db "PRAGMA integrity_check;"
 - **`custom` 的启用方式**：只能由服务端配置允许列表，或经管理端注册/审批后登记来源（管理端能力属 P1）；P0 不实现管理端，`custom` 实际不可用，但值本身保留在字典与校验中。
 - **落地位置**：§6.2 字段定义、§12.3 S-1 校验、§11.2 数据字典、AC-33。
 
-### D10（已定，P0）：`relative_seconds` 负值容差 = `-5.0`
+### D10（已定，P0）：timeline 事件 `relative_seconds` 负值容差 = `-60.0`（首题前锚缓冲）
 
-**最终决定：`relative_seconds >= -5.0` 合法；`< -5.0` 返回 422 `INVALID_TIMELINE`，整批拒绝、不部分入库。**
+**最终决定：timeline 事件 `relative_seconds >= -60.0` 合法；`< -60.0` 返回 422 `INVALID_TIMELINE`，整批拒绝、不部分入库。**
 
-- 依据：设备 `t0` 在 CLAIM 时产生，客户端可能早于服务端 `started_at` 数秒，`-5s` 覆盖该抖动；`-30s` 会掩盖锚点错误。
-- 全文唯一阈值，与 §8.4 L1 校验、§8.5 `pre_anchor` 标记、§12 API 示例、AC-09 完全一致；不存在其他负值阈值。
-- 注意区分三层：负值越界属**数据合法性**（L1，422）；`[-5, 0)` 属**时间质量标记**（L2，`pre_anchor`）；分析阶段是否剔除属**研究筛选**（L3，不在服务端做）。
+- 依据：S1 在客户端进入对话时才创建，首题展示与 TTS 可能早于锚点数十秒（实测约 21 s）；`-5 s` 会导致首题事件缺失，`-60 s` 覆盖该缓冲，`< -60 s` 仍视为锚点错误。
+- 该阈值只作用于 timeline 事件；表情记录（`emotion_records`）的负值容差保持 `-5.0` 不变。
+- 与 §8.4 L1 校验、§8.5 `pre_anchor` 标记、§12.4 U-2、AC-09 一致。
+- 注意区分三层：负值越界属**数据合法性**（L1，422）；`[-60, 0)` 属**时间质量标记**（L2，`pre_anchor`，时间按真值保留）；分析阶段是否剔除属**研究筛选**（L3，不在服务端做）。
 
 ### D11（已定，P0）：`session_id` 保持 `uuid4().hex`，不引入格式变更
 
@@ -4608,6 +4636,28 @@ sqlite3 /opt/backup/psychology-YYYYmmdd-HHMMSS.db "PRAGMA integrity_check;"
 5. **时间语义收紧**：派生 `event_timestamp` 只进 `quality_info.derived_time`，不改变记录 `quality`；P0 不宣称精确跨模态同步。
 6. **加密口径**：P0 无 TLS/证书/传输加密/加密存储/校时；保留日志脱敏、基础查询鉴权、设备身份管理；`subject_ref` 是脱敏标识而非加密。
 
+### C.8 v1.4 补充修订（2026-11-19）—— timeline 事件负值容差 -5 → -60（首题前锚缓冲）
+
+**触发**：真机测评中首题 `question_shown` 等事件早于 S1 锚点超过 5 s，被 L1 整批拒绝，导致首题事件缺失。
+
+**改了哪些章节**
+
+| 章节 | 变更 |
+| --- | --- |
+| §8.1 | 负值容差表述 5 s → 60 s |
+| §8.4 | L1 校验改为 `relative_seconds >= -60.0`；`[-60,0)` 标 `pre_anchor` |
+| §8.5 | `flags` 表中 `pre_anchor` 区间改为 `[-60,0)` |
+| §12.4 U-2 | 事件上传校验下限改为 `-60.0` |
+| §22 D10 / 附录 D | 决策阈值改为 `-60.0`，明确仅作用于 timeline 事件 |
+
+**边界**：`-60.0` 接受并标 `pre_anchor`；`-60.1` 返回 422 `INVALID_TIMELINE`；时间字段按真值保留，不重算、不新增字段。表情记录 `emotion_records` 的 `-5.0` 下限不变。
+
+### C.9 v1.4 补充修订（2026-11-19）—— 明确 `session_devices` 结束后仍保持 `bound`
+
+**触发**：审计发现 completed 会话的 `session_devices.status` 仍为 `bound`，需说明这是设计而非漏改。
+
+**补充口径**（§9.3 `session_devices` 表）：会话结束后保持 `bound` 是有意设计——迟到上传在 `late_upload_deadline` 内以 `status == "bound"` 放行；若结束时置 `unbound`，迟到批次会被 `403 DEVICE_NOT_BOUND` 卡死。`unbound` 仅在显式解绑时写入。仅补文档，不改代码、接口与库表。
+
 ---
 
 ## 附录 D：关键设计决策追踪表
@@ -4624,7 +4674,7 @@ sqlite3 /opt/backup/psychology-YYYYmmdd-HHMMSS.db "PRAGMA integrity_check;"
 | **D3** | 设备身份：P0 不要求硬件 SN；`device_id` 为配置槽位，靠注册快照 + 变更分级 R1–R5 + token 强绑定/轮换/撤销 + 异常审计降低风险 | §17.4 | `devices` 增 `identity_changed_at`/`token_rotated_at`/`token_revoked_at`；新建 `device_audit_events`（M13） | 注册/心跳/token 轮换/撤销接口；异常响应头 `X-Identity-Warning` | P0（自动轮换 P1、硬件身份 P2） |
 | **D5** | `emotion_results` **保持** `UNIQUE(session_id)`；P0 幂等靠 `upload_batches(session_id, source, client_request_id)` 唯一；多批次**累加**后重算并 **UPDATE 同一行**；**仅 `emotion_results` 不引入 `result_version`**（`external_result_snapshots.result_version` 仍按 §14.4 保留，用于快照幂等与版本区分） | §22 D5、§11.4 M4、§14.4、§19 P0-5 | 新建 `upload_batches`；`emotion_results` 约束**不变** | 上传接口返回 `duplicate`；结果始终一行 | P0（`emotion_results` 版本语义/历史追溯 P1） |
 | **D9** | `source_system` 固定三值 `xin_tan_tan`/`standalone`/`custom`；一期不开放客户端自注册第三方；`legacy_app` 仅为历史数据标识 | §6.2、§12.3 S-1、§11.2、§22 D9 | `sessions.source_system VARCHAR(32) NOT NULL default 'standalone'` | 非法值 422 `INVALID_SOURCE_SYSTEM`；客户端传 `custom` → 403 `SOURCE_SYSTEM_NOT_ALLOWED` | P0（管理端注册 P1） |
-| **D10** | `relative_seconds >= -5.0` 合法；`< -5.0` → 422 `INVALID_TIMELINE`；该阈值全文唯一 | §8.4、§8.5、§12.4、§22 D10 | 无（仅校验） | 上传校验；`[-5,0)` 加 `pre_anchor` flag | P0 |
+| **D10** | timeline 事件 `relative_seconds >= -60.0` 合法；`< -60.0` → 422 `INVALID_TIMELINE`；表情记录仍为 `-5.0` | §8.4、§8.5、§12.4、§22 D10 | 无（仅校验） | 上传校验；`[-60,0)` 加 `pre_anchor` flag | P0 |
 | **D11** | `session_id` 保持 `uuid4().hex`（32 hex，无前缀）；平台 ID（S1）与外部业务 ID（N1）严格区分 | §6.2、§11.2、§22 D11 | `sessions.session_id VARCHAR(64)` 不缩列、不改生成方式 | 响应与路径均为 32 hex；示例 `ses_` 仅为占位 | P0 |
 | **D12** | 传输安全两段式：**P0 保持 HTTP 业务联调，不实施 TLS/证书/传输加密/加密存储/校时**；P1 安全专项（P1-16）完成域名证书、Nginx/443、双端 HTTPS、设备校时、证书校验、旧端过渡与关闭。P0 基础查询鉴权属访问控制、**不等于**传输加密；`subject_ref` 为脱敏标识、**不属加密** | §17.2、§17.3、§17.5、§19.3 P1-16、§22 D12 | 无结构变更 | P0 **不改 base URL**；P1 全端改 `https` | P0：日志脱敏 + **基础查询鉴权（P0-17）** + 身份保护；TLS 全部归 **P1 安全专项** |
 | **C1** | `external_session_id` 只接受 N1，客户端必须持久化 | §6.8 | `external_session_id VARCHAR(128) NULL` | 创建接口字段 | P0 |

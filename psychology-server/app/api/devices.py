@@ -316,20 +316,57 @@ def connect_device(
     "/{device_id}/disconnect",
     response_model=DeviceDisconnectResponse,
     summary="手机断开设备",
-    description="手机退出设备页时调用，关闭本次连接。connection_id 不存在 → 404；重复调用幂等。",
+    description=(
+        "手机退出设备页时调用，关闭本次连接。\n\n"
+        "**两种定位方式**（`connection_id` 优先）：\n"
+        "- 传 `connection_id`：精确关闭；不存在 → 404 `CONNECTION_NOT_FOUND`\n"
+        "- 只传 `app_client_id`(+`user_id`)：按设备 + 手机实例解析当前 `connected` 连接并关闭；"
+        "无活跃连接但存在历史记录时返回最近一条（已断开），完全无记录 → 404 `NO_ACTIVE_CONNECTION`\n\n"
+        "两个字段都未提供 → 400 `MISSING_CONNECTION_IDENTIFIER`。重复调用幂等。"
+    ),
 )
 def disconnect_device(
     device_id: str,
-    req: DeviceDisconnectRequest,
+    req: DeviceDisconnectRequest | None = None,
     db: DBSession = Depends(get_db),
 ) -> Any:
-    connection = device_service.disconnect_device(db, req.connection_id)
-    if connection is None:
+    if req is None or (not req.connection_id and not req.app_client_id):
         raise HTTPException(
-            status_code=404, detail=f"connection {req.connection_id} not found"
+            status_code=400,
+            detail=(
+                "MISSING_CONNECTION_IDENTIFIER: "
+                "connection_id or app_client_id is required"
+            ),
         )
-    if connection.device_id != device_id:
-        raise HTTPException(status_code=403, detail="connection belongs to another device")
+    if req.connection_id:
+        connection = device_service.get_connection(db, req.connection_id)
+        if connection is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"CONNECTION_NOT_FOUND: {req.connection_id}",
+            )
+        if connection.device_id != device_id:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"CONNECTION_DEVICE_MISMATCH: {connection.connection_id} "
+                    f"does not belong to {device_id}"
+                ),
+            )
+        connection = device_service.disconnect_device(db, connection.connection_id)
+    else:
+        connection = device_service.disconnect_by_app_client(
+            db, device_id, req.app_client_id, user_id=req.user_id
+        )
+        if connection is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"NO_ACTIVE_CONNECTION: device {device_id} / "
+                    f"app_client_id {req.app_client_id}"
+                ),
+            )
+
     return DeviceDisconnectResponse(
         connection_id=connection.connection_id,
         device_id=connection.device_id,

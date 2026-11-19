@@ -10,6 +10,7 @@
 注意：审计 detail 只允许写 token 指纹，绝不写 token 明文。
 """
 import hashlib
+import ipaddress
 import re
 import time
 from collections import defaultdict
@@ -225,6 +226,17 @@ def record_registration_burst(
     )
 
 
+def _is_loopback(source_ip: str) -> bool:
+    """loopback（127.0.0.0/8、::1、IPv4-mapped）不代表真实位置差异，不参与克隆判定。"""
+    try:
+        address = ipaddress.ip_address(source_ip.strip())
+    except ValueError:
+        return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return address.is_loopback
+
+
 def observe_device_ip(
     db: DBSession,
     device_id: str,
@@ -235,8 +247,11 @@ def observe_device_ip(
     """I6：10 分钟内同一 device_id 来自 ≥2 个不同 IP → possible clone。
 
     返回是否本次新写入审计；调用方负责 commit。
+    loopback 地址（本机部署/本地代理）不计入 IP 多样性，避免误报。
     """
     if not source_ip:
+        return False
+    if _is_loopback(source_ip):
         return False
     current = time.time()
     window = _activity[device_id]

@@ -149,11 +149,37 @@ def test_pre_anchor_flag(client):
     assert "pre_anchor" in event["quality_info"]["flags"]
 
 
-def test_below_minus_five_rejected(client):
+def test_minus_sixty_accepted_with_pre_anchor(client):
+    dev = "atlas_evt_pre60"
+    headers = _ensure_device(client, dev)
+    sid = _new_session(client, dev, headers)
+
+    resp = _upload(client, sid, headers, [_event(relative_seconds=-60.0)])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["accepted"] == 1
+
+    event = client.get(f"/api/v1/sessions/{sid}/events", headers=QH).json()["events"][0]
+    assert "pre_anchor" in event["quality_info"]["flags"]
+
+
+def test_minus_six_accepted_with_pre_anchor(client):
+    dev = "atlas_evt_pre6"
+    headers = _ensure_device(client, dev)
+    sid = _new_session(client, dev, headers)
+
+    resp = _upload(client, sid, headers, [_event(relative_seconds=-6.0)])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["accepted"] == 1
+
+    event = client.get(f"/api/v1/sessions/{sid}/events", headers=QH).json()["events"][0]
+    assert "pre_anchor" in event["quality_info"]["flags"]
+
+
+def test_below_minus_sixty_rejected(client):
     dev = "atlas_evt_neg"
     headers = _ensure_device(client, dev)
     sid = _new_session(client, dev, headers)
-    resp = _upload(client, sid, headers, [_event(relative_seconds=-5.5)])
+    resp = _upload(client, sid, headers, [_event(relative_seconds=-60.1)])
     assert resp.status_code == 422
 
 

@@ -10,3 +10,5 @@ venv/
 logs/
 exports/
 .pytest_cache/
+# 本机运维信息（含凭据，禁止提交）
+.ops/

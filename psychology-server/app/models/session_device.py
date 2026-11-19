@@ -30,7 +30,9 @@ class SessionDevice(Base):
     )
     # primary / auxiliary
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="primary")
-    # bound / unbound
+    # bound / unbound：会话级绑定状态，与会话生命周期绑定；
+    # 不是设备连接状态（后者见 device_connections.connected/disconnected）。
+    # 会话完成或手机 disconnect 都不改变本列，否则会阻断迟到上传。
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="bound")
     bound_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     unbound_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

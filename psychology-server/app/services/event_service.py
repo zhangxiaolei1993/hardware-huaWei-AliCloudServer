@@ -232,7 +232,7 @@ def create_events(
 
         protocol = _protocol_version(event.protocol_version, req.schema_version)
         flags: List[str] = ["clock_unverified"]
-        if -5.0 <= event.relative_seconds < 0:
+        if -60.0 <= event.relative_seconds < 0:
             flags.append("pre_anchor")
         if event.relative_seconds > bound:
             flags.append("out_of_range")
