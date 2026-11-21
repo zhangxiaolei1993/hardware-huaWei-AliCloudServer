@@ -250,3 +250,101 @@ def test_export_requires_api_key_and_validates_filters(client):
         "/api/v1/research/sessions/s-not-exist/export", headers=HEADERS
     )
     assert resp.status_code == 404
+
+
+def test_list_sessions_returns_s1_and_counts(client):
+    sid = "s-api-list-0001"
+    _seed_session(sid, LATE, [(0.5, "neutral"), (1.5, "happiness")], with_event=True)
+
+    resp = client.get("/api/v1/research/sessions", headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    db = SessionLocal()
+    try:
+        expected_total = db.query(SessionModel).count()
+    finally:
+        db.close()
+    assert data["total"] == len(data["sessions"]) == expected_total
+
+    row = next(item for item in data["sessions"] if item["session_id"] == sid)
+    assert row["emotion_records"] == 2
+    assert row["timeline_events"] == 1
+    assert row["has_result"] is True
+    assert row["source_system"] == "standalone"
+    assert row["started_at_bj"] == "2026-11-20T17:00:00+08:00"
+    assert row["ended_at_bj"] == "2026-11-20T17:02:00+08:00"
+
+
+def test_export_all_endpoint_without_params(client, tmp_path):
+    sid = "s-api-all-0001"
+    _seed_session(sid, LATE, [(0.5, "neutral")])
+
+    resp = client.get("/api/v1/research/export/all", headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"] == "application/zip"
+
+    root, names = _extract(tmp_path, resp.content)
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert sid in manifest["sessions"]
+    assert manifest["filters"]["format"] == "both"
+    assert (root / "sessions" / sid / "raw" / "emotion_records.csv").is_file()
+    assert (root / "sessions" / sid / "derived" / "emotion_results.jsonl").is_file()
+
+
+def test_export_by_beijing_time_range(client, tmp_path):
+    early_sid = "s-api-time-early-0001"
+    late_sid = "s-api-time-late-0001"
+    _seed_session(early_sid, EARLY, [(0.5, "neutral")])
+    _seed_session(late_sid, LATE, [(0.5, "neutral")])
+
+    # 北京时间 2026-11-20 全天：UTC 09:00 = 北京 17:00，应命中；2020 年那场应排除
+    resp = client.get(
+        "/api/v1/research/export",
+        params={"from": "2026-11-20", "to": "2026-11-20"},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+    root, _ = _extract(tmp_path, resp.content)
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert late_sid in manifest["sessions"]
+    assert early_sid not in manifest["sessions"]
+
+    # 只给 from 也可以
+    resp = client.get(
+        "/api/v1/research/export",
+        params={"from": "2026-11-20"},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 格式错误、from 晚于 to → 422
+    resp = client.get(
+        "/api/v1/research/export", params={"from": "2026-13-40"}, headers=HEADERS
+    )
+    assert resp.status_code == 422
+    resp = client.get(
+        "/api/v1/research/export",
+        params={"from": "2026-11-21", "to": "2026-11-20"},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 422
+
+
+def test_api_key_query_parameter_for_get_endpoints(client, tmp_path):
+    sid = "s-api-querykey-0001"
+    _seed_session(sid, LATE, [(0.5, "neutral")])
+
+    resp = client.get("/api/v1/research/sessions", params={"api_key": API_KEY})
+    assert resp.status_code == 200, resp.text
+
+    resp = client.get(
+        f"/api/v1/research/sessions/{sid}/export", params={"api_key": API_KEY}
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = client.get("/api/v1/research/export/all", params={"api_key": API_KEY})
+    assert resp.status_code == 200, resp.text
+
+    resp = client.get("/api/v1/research/sessions", params={"api_key": "wrong"})
+    assert resp.status_code == 401

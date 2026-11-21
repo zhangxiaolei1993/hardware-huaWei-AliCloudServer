@@ -10,10 +10,11 @@
 import hashlib
 import importlib
 import shutil
+import sqlite3
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -78,6 +79,65 @@ def resolve_database_path() -> Path:
             "in-memory sqlite cannot be exported", status_code=500
         )
     return Path(url.database).resolve()
+
+
+_BJ_TZ = timezone(timedelta(hours=8))
+
+
+def _to_beijing(value: Optional[str]) -> Optional[str]:
+    """数据库 UTC 时间字符串 → 北京时间 ISO8601（带 +08:00）。"""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_BJ_TZ).isoformat(timespec="seconds")
+
+
+def list_sessions() -> List[Dict[str, Any]]:
+    """只读查询会话清单，供用户直接挑 S1（不连 ORM、不写库）。"""
+    db_path = resolve_database_path()
+    if not db_path.exists():
+        raise ResearchExportError(f"database not found: {db_path}", status_code=500)
+
+    conn = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        rows = conn.execute(
+            """
+            SELECT s.session_id, s.external_session_id, s.source_system, s.status,
+                   s.started_at, s.ended_at, s.created_at,
+                   (SELECT COUNT(*) FROM emotion_records r
+                     WHERE r.session_id = s.session_id) AS emotion_records,
+                   (SELECT COUNT(*) FROM timeline_events e
+                     WHERE e.session_id = s.session_id) AS timeline_events,
+                   EXISTS(SELECT 1 FROM emotion_results x
+                     WHERE x.session_id = s.session_id) AS has_result
+            FROM sessions s
+            ORDER BY COALESCE(s.started_at, s.created_at) DESC, s.session_id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "session_id": row["session_id"],
+            "external_session_id": row["external_session_id"],
+            "source_system": row["source_system"],
+            "status": row["status"],
+            "started_at_bj": _to_beijing(row["started_at"] or row["created_at"]),
+            "ended_at_bj": _to_beijing(row["ended_at"]),
+            "emotion_records": row["emotion_records"],
+            "timeline_events": row["timeline_events"],
+            "has_result": bool(row["has_result"]),
+        }
+        for row in rows
+    ]
 
 
 def create_research_export(

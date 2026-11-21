@@ -25,6 +25,31 @@ def parse_utc(value: str) -> Optional[datetime]:
         return None
 
 
+class ResearchSessionItem(BaseModel):
+    """会话清单行：只保留导出选号所需字段。"""
+
+    session_id: str
+    external_session_id: Optional[str] = None
+    source_system: Optional[str] = None
+    status: Optional[str] = None
+    started_at_bj: Optional[str] = Field(
+        default=None, description="开始时间（北京时间 UTC+8，ISO8601）"
+    )
+    ended_at_bj: Optional[str] = Field(
+        default=None, description="结束时间（北京时间 UTC+8，ISO8601）"
+    )
+    emotion_records: int
+    timeline_events: int
+    has_result: bool
+
+
+class ResearchSessionList(BaseModel):
+    """会话清单响应。"""
+
+    total: int
+    sessions: List[ResearchSessionItem]
+
+
 class ResearchExportRequest(BaseModel):
     """批量/多会话科研导出请求。
 

@@ -3,7 +3,7 @@ import hmac
 import secrets
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
@@ -45,6 +45,24 @@ def require_api_key(
     """查询接口基础鉴权（P0-17 / AC-15）：设备列表、会话查询、结果查询。"""
     expected = get_settings().query_api_key
     if not expected or not x_api_key or not hmac.compare_digest(expected, x_api_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="UNAUTHORIZED: invalid or missing X-Api-Key",
+        )
+
+
+def require_research_api_key(
+    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
+    api_key: Optional[str] = Query(default=None),
+) -> None:
+    """科研导出 GET 接口鉴权：优先 ``X-Api-Key``，其次 ``?api_key=``。
+
+    查询参数仅供内网/本人浏览器直接点击下载使用，会被访问日志记录；
+    不要在其他业务接口上启用。
+    """
+    expected = get_settings().query_api_key
+    provided = x_api_key or api_key
+    if not expected or not provided or not hmac.compare_digest(expected, provided):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="UNAUTHORIZED: invalid or missing X-Api-Key",

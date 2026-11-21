@@ -9,7 +9,7 @@
 （`anchor + relative_seconds`），一律标 `estimated`，且绝不回写记录 `quality`（AC-35）。
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session as DBSession
 from starlette.background import BackgroundTask
 
-from app.core.security import require_api_key
+from app.core.security import require_api_key, require_research_api_key
 from app.db.database import get_db
 from app.schemas.export import ExportCreateRequest, ExportCreateResponse
 from app.schemas.research_export import (
@@ -25,6 +25,7 @@ from app.schemas.research_export import (
     DEFAULT_DATA_TYPES,
     ExportFormat,
     ResearchExportRequest,
+    ResearchSessionList,
 )
 from app.services import export_service, research_export_service, session_service
 
@@ -131,6 +132,44 @@ def _run_research_export(**kwargs: Any) -> "research_export_service.ResearchExpo
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
+def _run_research_service(fn: Any) -> Any:
+    try:
+        return fn()
+    except research_export_service.ResearchExportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+_BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def _parse_beijing_time(
+    value: Optional[str], name: str, *, end_of_day: bool = False
+) -> Optional[datetime]:
+    """北京时间入参解析：支持 ``YYYY-MM-DD`` 或 ISO8601；返回 UTC。"""
+    if value is None or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        if len(text) == 10 and text[4] == "-" and text[7] == "-":
+            parsed = datetime.strptime(text, "%Y-%m-%d")
+            if end_of_day:
+                parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999999)
+            parsed = parsed.replace(tzinfo=_BEIJING_TZ)
+        else:
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=_BEIJING_TZ)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{name} 不是合法的北京时间；示例：2026-11-01、"
+                f"2026-11-01T18:30:00（按北京时间 UTC+8 理解）"
+            ),
+        ) from exc
+    return parsed.astimezone(timezone.utc)
+
+
 def _research_file_response(
     artifact: "research_export_service.ResearchExportArtifact",
 ) -> FileResponse:
@@ -183,13 +222,72 @@ def create_research_export(req: ResearchExportRequest) -> FileResponse:
 
 
 @router.get(
+    "/research/sessions",
+    response_model=ResearchSessionList,
+    summary="列出可导出的会话（挑 S1）",
+    description=(
+        "返回全部会话清单，含 S1、北京时间起止、状态、来源、N1、表情条数、"
+        "事件条数与是否有结果（需 `X-Api-Key`，也支持 `?api_key=`）。\n\n"
+        "按开始时间倒序；可直接把 `session_id` 填进单会话导出接口。"
+    ),
+    dependencies=[Depends(require_research_api_key)],
+)
+def list_research_sessions() -> Any:
+    rows = _run_research_service(research_export_service.list_sessions)
+    return {"total": len(rows), "sessions": rows}
+
+
+@router.get(
+    "/research/export/all",
+    summary="一键全量导出（zip，无参数）",
+    description=(
+        "导出全部会话的全部数据类型，CSV+JSONL，直接返回 zip"
+        "（需 `X-Api-Key`，也支持 `?api_key=`）。"
+    ),
+    dependencies=[Depends(require_research_api_key)],
+)
+def export_all_research() -> FileResponse:
+    artifact = _run_research_export(export_all=True)
+    return _research_file_response(artifact)
+
+
+@router.get(
+    "/research/export",
+    summary="按北京时间段导出全部会话（zip）",
+    description=(
+        "只接受 `from` / `to` 两个北京时间参数，导出时段内所有会话的全部数据；"
+        "可只给一个，都不给等同全量（需 `X-Api-Key`，也支持 `?api_key=`）。\n\n"
+        "- 日期可写 `2026-11-01`（`to` 含当天 23:59:59）或 ISO8601；\n"
+        "- 不带时区按北京时间 UTC+8 理解；格式错误或 from 晚于 to 返回 422。"
+    ),
+    dependencies=[Depends(require_research_api_key)],
+)
+def export_research_by_time(
+    from_: Optional[str] = Query(default=None, alias="from"),
+    to: Optional[str] = Query(default=None, alias="to"),
+) -> FileResponse:
+    start = _parse_beijing_time(from_, "from")
+    end = _parse_beijing_time(to, "to", end_of_day=True)
+    if start is not None and end is not None and start > end:
+        raise HTTPException(status_code=422, detail="from 不能晚于 to")
+    artifact = _run_research_export(
+        export_all=True,
+        from_utc=start.isoformat() if start else None,
+        to_utc=end.isoformat() if end else None,
+    )
+    return _research_file_response(artifact)
+
+
+@router.get(
     "/research/sessions/{session_id}/export",
     summary="导出单场会话科研数据（zip）",
     description=(
-        "单会话导出，口径与 `POST /research/exports` 相同（需 `X-Api-Key`）。\n\n"
-        "`data_types` 用逗号分隔，默认全部；会话不存在返回 404。"
+        "单会话导出，口径与 `POST /research/exports` 相同（需 `X-Api-Key`，"
+        "也支持 `?api_key=`）。\n\n"
+        "不填参数即导出全部数据类型、CSV+JSONL；`data_types` 用逗号分隔；"
+        "会话不存在返回 404。"
     ),
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_research_api_key)],
 )
 def export_research_session(
     session_id: str,
