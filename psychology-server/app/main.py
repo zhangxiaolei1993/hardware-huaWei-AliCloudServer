@@ -53,6 +53,12 @@ OPENAPI_TAGS: List[Dict[str, str]] = [
         "description": "**表情识别业务（当前唯一业务）**：测评结束后批量上传原始 timeline，"
         "由服务器重新计算最终统计结果。",
     },
+    {
+        "name": "exports",
+        "description": "**科研导出**：P0 单会话导出（csv/json）与 P1-A 科研打包导出"
+        "（CSV/JSONL、raw/derived 分目录、数据字典、质量报告与 manifest）。"
+        "统一使用 `X-Api-Key` 鉴权，只读访问数据库。",
+    },
 ]
 
 
