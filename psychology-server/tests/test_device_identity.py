@@ -10,7 +10,7 @@ from app.models.device_audit_event import DeviceAuditEvent
 
 
 def _app_headers() -> dict:
-    return {"X-App-Key": get_settings().app_key}
+    return {"X-Api-Key": get_settings().query_api_key}
 
 
 def _register(client, device_id: str, **overrides):
@@ -79,7 +79,7 @@ def test_02_rotate_token_invalidates_old_immediately(client):
     old_token = resp.json()["device_token"]
     assert _heartbeat(client, "identity_dev_02", old_token).status_code == 200
 
-    # 缺少 X-App-Key 不允许轮换
+    # 缺少 X-Api-Key 不允许轮换
     assert (
         client.post("/api/v1/devices/identity_dev_02/rotate-token").status_code == 401
     )

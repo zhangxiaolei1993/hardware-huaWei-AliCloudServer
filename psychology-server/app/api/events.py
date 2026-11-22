@@ -45,7 +45,7 @@ def upload_events(
     device: Optional[Device] = Depends(get_optional_device),
 ) -> Any:
     session = _get_session_or_404(db, session_id)
-    # 带设备凭证时校验归属；Flutter 集成鉴权（X-App-Key）属 P0-17
+    # 带设备凭证时校验归属；Flutter 集成鉴权（X-Api-Key）属 P0-17
     if device is not None and session.device_id != device.device_id:
         raise HTTPException(status_code=403, detail="session belongs to another device")
 

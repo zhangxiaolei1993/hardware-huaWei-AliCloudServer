@@ -37,7 +37,7 @@ def sync_result(
     session = session_service.get_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"session {session_id} not found")
-    # 带设备凭证时校验归属；Flutter 的 X-App-Key 鉴权属 P0-17
+    # 带设备凭证时校验归属；Flutter 的 X-Api-Key 鉴权属 P0-17
     if device is not None and session.device_id != device.device_id:
         raise HTTPException(status_code=403, detail="session belongs to another device")
 

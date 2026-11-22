@@ -77,7 +77,7 @@ def register_device(
     response_model=DeviceTokenRotateResponse,
     summary="轮换设备 token",
     description=(
-        "管理接口（需 `X-App-Key`）：原子替换 token，**旧 token 立即失效**，"
+        "管理接口（需 `X-Api-Key`）：原子替换 token，**旧 token 立即失效**，"
         "新明文仅本次响应返回一次，并记 `token_rotated` 审计。\n\n"
         "被吊销设备返回 403 `DEVICE_REVOKED`，请改用 `reinstate`。"
     ),
@@ -108,7 +108,7 @@ def rotate_device_token(
     response_model=DeviceRevokeResponse,
     summary="吊销设备 token",
     description=(
-        "管理接口（需 `X-App-Key`）：置 `token_revoked_at`，token 立即 401；"
+        "管理接口（需 `X-Api-Key`）：置 `token_revoked_at`，token 立即 401；"
         "该设备再注册返回 403 `DEVICE_REVOKED`。恢复须调用 `reinstate`。重复调用幂等。"
     ),
     dependencies=[Depends(require_app_key)],
@@ -135,7 +135,7 @@ def revoke_device(
     response_model=DeviceReinstateResponse,
     summary="恢复被吊销设备",
     description=(
-        "管理接口（需 `X-App-Key`）：清除吊销标记并生成**新 token**（仅返回一次）。"
+        "管理接口（需 `X-Api-Key`）：清除吊销标记并生成**新 token**（仅返回一次）。"
         "设备需人工更新配置后重启。"
     ),
     dependencies=[Depends(require_app_key)],
@@ -178,8 +178,8 @@ def list_devices(db: DBSession = Depends(get_db)) -> Any:
     summary="查询设备",
     description=(
         "按 device_id 查询设备信息。在线状态在查询时惰性判断（超过 30 秒无心跳判为 offline）。\n\n"
-        "认证（§12.2 D-4）：设备 token（`X-Device-Id` + `X-Device-Token`）、"
-        "`X-App-Key`、`X-Api-Key` 三者任一。\n\n"
+        "认证（§12.2 D-4）：设备 token（`X-Device-Id` + `X-Device-Token`）"
+        "或 `X-Api-Key` 任一（`X-App-Key` 为兼容别名，取值相同）。\n\n"
         "- 设备启动自检用设备 token 调用本接口；token 失效/吊销返回 401，设备据此重新注册\n"
         "- 设备 token 与 `{device_id}` 不一致返回 403\n"
         "- 响应恒不含 `device_token`"

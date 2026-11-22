@@ -1965,7 +1965,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | 认证类型 | 请求头 | 适用 | 现状 |
 | --- | --- | --- | --- |
 | 设备认证 | `X-Device-Id` + `X-Device-Token` | 设备写操作 | 已有 |
-| 应用认证 | `X-App-Key`（Flutter 侧，按安装批次下发） | Flutter 写操作（事件、结果同步） | **新增** |
+| 应用认证 | `X-Api-Key`（`X-App-Key` 为兼容别名，取值相同） | Flutter 写操作（事件、结果同步） | **统一** |
 | 管理认证 | `X-Api-Key` | 科研查询、导出、设备管理 | **新增** |
 | 免认证 | — | 仅 `GET /health` 与设备 `active-session` 轮询（保留现状） | 已有 |
 
@@ -2055,16 +2055,16 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | 项 | 内容 |
 | --- | --- |
 | 方法/URL | `GET /devices?limit=50&cursor=...` |
-| 认证 | **改为 `X-Api-Key`**（或 Flutter 的 `X-App-Key`） |
+| 认证 | **`X-Api-Key`**（`X-App-Key` 为同值兼容别名） |
 | 变更 | 分页；字段裁剪（去掉 `device_token` 永不出现在任何响应——现状已达标，需保持） |
-| 保留 | 手机端需要选择设备 → 用 `X-App-Key` 调用，响应仅 `device_id`/`device_name`/`device_type`/`model`/`status` |
+| 保留 | 手机端需要选择设备 → 用 `X-Api-Key` 调用，响应仅 `device_id`/`device_name`/`device_type`/`model`/`status` |
 
 #### D-4 设备详情（复用）
 
-`GET /devices/{device_id}` — 认证改为 **「设备 token 或 `X-App-Key` 或 `X-Api-Key`」三者任一**。
+`GET /devices/{device_id}` — 认证改为 **「设备 token 或 `X-Api-Key`」二者任一**。
 
-> **不能只改成 App-Key**：设备端启动自检就是用**设备 token** 调这个接口（`app-trae` 的 `cloud_client.py:120-122`），
-> 若只接受 `X-App-Key` 会直接打断设备启动。因此认证策略必须是「设备 token **或** App-Key」的并集，
+> **不能只接受 `X-Api-Key`**：设备端启动自检就是用**设备 token** 调这个接口（`app-trae` 的 `cloud_client.py:120-122`），
+> 若只接受 `X-Api-Key` 会直接打断设备启动。因此认证策略必须是「设备 token **或** `X-Api-Key`」的并集，
 > 且带设备 token 时仍要校验 `{device_id}` 与 `X-Device-Id` 一致（现状已校验 403）。
 >
 > 响应字段同现状，`status` 为惰性计算值（**不修改 ORM 实例**，见 A12）。
@@ -2099,7 +2099,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | 项 | 内容 |
 | --- | --- |
 | 方法/URL | `POST /devices/{device_id}/connect`、`POST /devices/{device_id}/disconnect` |
-| 认证 | **改为 `X-App-Key`** |
+| 认证 | **改为 `X-Api-Key`** |
 | 变更 | connect 响应的 `connection_id` 语义不变；新增 `reachable` 布尔（设备是否真在线），与原 `connected` 并存以兼容；DB 中 `device_connections.status` 保持「意图」语义并加注释 |
 
 ### 12.3 Session 组
@@ -2109,7 +2109,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | 项 | 内容 |
 | --- | --- |
 | 方法/URL | `POST /sessions` |
-| 认证 | 设备 token（设备自建）**或** `connection_id`（Flutter）**或** `X-App-Key`（Flutter 集成模式） |
+| 认证 | 设备 token（设备自建）**或** `connection_id`（Flutter）**或** `X-Api-Key`（Flutter 集成模式） |
 | 幂等 | **仅** `(source_system, client_request_id)` 已存在 → `200 {created:false, session_id:<原S1>}`。**不得用 N1 判重**（N1→S1 一对多，见 §6.5.1） |
 | 冲突 | 设备已有 `created/running` 会话且不是本次要复用的 S1 → `409 SESSION_ALREADY_ACTIVE`，`data.active_session_id` 给出可复用 ID |
 | 校验 | `session_type ∈ {"emotion","multimodal","assessment","physiological","speech","custom"}`（**现状被 `Literal["emotion"]` 锁死，见 A2，必须放开**）；`external_session_id` 仅在 `source_system != standalone` 时允许；`device_id` 必须已注册且在线（保留现状 409）；`source_system='xin_tan_tan'` 时必须提供 `external_session_id`；`source_system ∈ {xin_tan_tan, standalone}`，请求体传 `custom` 或历史值 `legacy_app` → 403 `SOURCE_SYSTEM_NOT_ALLOWED` / 422 `INVALID_SOURCE_SYSTEM` |
@@ -2166,14 +2166,14 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 
 #### S-2 查询会话（复用，扩展）
 
-`GET /sessions/{session_id}` — 认证：`X-App-Key` 或 `X-Api-Key`；响应新增 `source_system`、`external_session_id`、`anchor`、`ended_reason`、`late_upload_deadline`、`devices[]`。
+`GET /sessions/{session_id}` — 认证：`X-Api-Key`（`X-App-Key` 为兼容别名）；响应新增 `source_system`、`external_session_id`、`anchor`、`ended_reason`、`late_upload_deadline`、`devices[]`。
 
 #### S-3 更新会话状态（改造）
 
 | 项 | 内容 |
 | --- | --- |
 | 方法/URL | `POST /sessions/{session_id}/status` |
-| 认证 | 免认证保留（维持 Flutter 直连收尾能力）**但**建议加 `X-App-Key`；带设备 token 时校验归属（现状保留） |
+| 认证 | 免认证保留（维持 Flutter 直连收尾能力）**但**建议加 `X-Api-Key`；带设备 token 时校验归属（现状保留） |
 | 变更 | 允许 `status ∈ {running, completed, aborted}`；`running` 可携带 `anchor`；`completed`/`aborted` 可携带 `ended_reason` |
 | 校验 | `aborted` 后不可再转 `running`；`completed` 后不可回 `running`（现状已保证） |
 
@@ -2199,7 +2199,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | 项 | 内容 |
 | --- | --- |
 | 方法/URL | `POST /sessions/{session_id}/devices` |
-| 认证 | `X-App-Key` / `X-Api-Key` / 设备 token |
+| 认证 | `X-Api-Key` / 设备 token |
 | 幂等 | `UNIQUE(session_id, device_id)`，重复绑定返回 `200` + 原记录 |
 | 校验 | 会话必须为 `created`/`running`；设备必须已注册 |
 
@@ -2351,7 +2351,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | 项 | 内容 |
 | --- | --- |
 | 方法/URL | `POST /sessions/{session_id}/events` |
-| 认证 | `X-App-Key`（Flutter）或设备 token |
+| 认证 | `X-Api-Key`（Flutter）或设备 token |
 | 幂等 | `UNIQUE(session_id, source, event_id)`；批次内重复的 `event_id` 只入一次并在响应里报 `skipped` |
 | 校验 | `event_type` ∈ 13 类白名单；含 `answer_value` 等禁字段 → `422 FORBIDDEN_FIELD`；`relative_seconds` ≥ -60.0（首题前锚缓冲）；`occurred_at` ≤ `server_received_at + 60s`；单批 ≤ 2000 条 |
 | 会话状态 | `created`/`running` 全接受；`completed`/`interrupted` 仅在补传窗口内接受；`aborted` → `409 SESSION_ABORTED` |
@@ -2417,7 +2417,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 
 #### U-4 测评结果摘要同步（新增，详见 §14）
 
-`POST /sessions/{session_id}/results`，认证 `X-App-Key`；幂等 `idempotency_key`。
+`POST /sessions/{session_id}/results`，认证 `X-Api-Key`；幂等 `idempotency_key`。
 
 ### 12.5 数据查询组（全部新增，认证 `X-Api-Key`）
 
@@ -2477,7 +2477,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | --- | --- | --- | --- |
 | `POST /devices/register` | **可直接复用** | 无 | 仅新增可选字段 |
 | `POST /devices/{id}/heartbeat` | **改造（向后兼容）** | 低 | body/响应新增可选字段 |
-| `GET /devices` | **改造（必须）** | **中**：Flutter 若不传 `X-App-Key` 会 401 | 与前端同步发布；提供 1 个版本的过渡期（无 Key 时返回 401 而非 200，避免静默降级泄露） |
+| `GET /devices` | **改造（必须）** | **中**：Flutter 若不传 `X-Api-Key` 会 401 | 与前端同步发布；提供 1 个版本的过渡期（无 Key 时返回 401 而非 200，避免静默降级泄露） |
 | `GET /devices/{id}` | 改造（加认证） | 中 | 同上 |
 | `GET /devices/{id}/active-session` | **可直接复用** | 无 | 响应新增字段（前端忽略即可） |
 | `POST /devices/{id}/connect` | 改造（加认证 + `reachable`） | 中 | 与前端同步 |
@@ -2579,7 +2579,7 @@ X-Device-Token: b91d2f...
 
 ```http
 POST /api/v1/sessions
-X-App-Key: app_k_7f2a...
+X-Api-Key: <QUERY_API_KEY>
 
 {"device_id":"atlas_001","source_system":"xin_tan_tan",
  "external_session_id":"b-20261117-000123","session_type":"emotion",
@@ -2631,7 +2631,7 @@ X-Device-Token: b91d2f...
 
 ```http
 POST /api/v1/sessions/ses_9f2a.../events
-X-App-Key: app_k_7f2a...
+X-Api-Key: <QUERY_API_KEY>
 
 {"client_request_id":"evt-batch-0007","schema_version":"1.0","source":"app",
  "events":[{"event_id":"5c2e8a1b9f4d4c3e8a7b6d5c4e3f2a10","event_type":"question_shown",
@@ -2681,7 +2681,7 @@ X-Device-Token: b91d2f...
 
 ```http
 POST /api/v1/sessions/ses_9f2a.../results
-X-App-Key: app_k_7f2a...
+X-Api-Key: <QUERY_API_KEY>
 
 {"idempotency_key":"res:ses_9f2a1c7d4b8e4a1f9c0d3e5b7a2f1c44:22:v1",
  "source_system":"xin_tan_tan",
@@ -3038,7 +3038,7 @@ X-App-Key: app_k_7f2a...
 | 项 | 内容 |
 | --- | --- |
 | 方法/URL | `POST /sessions/{session_id}/results` |
-| 认证 | `X-App-Key` |
+| 认证 | `X-Api-Key` |
 | 请求体 | 见 §14.2.1（服务端唯一接受集） |
 | **幂等键** | 客户端按**固定公式**生成（见下），服务端校验公式；`UNIQUE(idempotency_key)` |
 | 碰撞 | 同键 + 同 `source_payload_sha256` → `200 {duplicate:true}` 返回原 `snapshot_id`；同键 + **不同** `source_payload_sha256` → **409 `IDEMPOTENCY_CONFLICT`** |
@@ -3395,8 +3395,8 @@ stateDiagram-v2
 
 | 阶段 | 措施 | 涉及项目 | 风险 |
 | --- | --- | --- | --- |
-| **P0（业务联调）** | ① 给 `GET /devices`、`GET /sessions/{id}`、`GET /emotion/sessions/{id}/result`、查询组加 `X-Api-Key`（手机侧用 `X-App-Key`）；② 服务改为非 root 用户运行；③ **设备身份保护 P0 子集**（D3，见 §17.4）；④ **日志脱敏**（token / 答案 / 转写文本不入日志）。**P0 不实施 TLS/HTTPS**，继续使用现有 `http://8.140.240.43:8000` | A + Flutter + 设备端配置 | 中（明文传输风险在 P0 期间**仍然存在**，属阶段性安排，不是已满足生产安全） |
-| **原 P1（安全加固专项）** | ~~⑤ 域名与证书、Nginx 终止 TLS + 公网 443、A 仅监听 `127.0.0.1:8000`；⑥ 设备 token 哈希存储；⑦ `X-App-Key` 轮换；⑧ 设备 token 自动轮换与证书固定；⑨ 客户端删除 ASR 完成后的音频；⑩ 设备系统时间校准与 TLS 证书链校验；⑪ 旧端 HTTP 入口关闭与安全验收~~ **2026-11-19 用户决定取消，不纳入后续规划** | — | — |
+| **P0（业务联调）** | ① 给 `GET /devices`、`GET /sessions/{id}`、`GET /emotion/sessions/{id}/result`、查询组加 `X-Api-Key`（手机侧统一用同一把 `X-Api-Key`）；② 服务改为非 root 用户运行；③ **设备身份保护 P0 子集**（D3，见 §17.4）；④ **日志脱敏**（token / 答案 / 转写文本不入日志）。**P0 不实施 TLS/HTTPS**，继续使用现有 `http://8.140.240.43:8000` | A + Flutter + 设备端配置 | 中（明文传输风险在 P0 期间**仍然存在**，属阶段性安排，不是已满足生产安全） |
+| **原 P1（安全加固专项）** | ~~⑤ 域名与证书、Nginx 终止 TLS + 公网 443、A 仅监听 `127.0.0.1:8000`；⑥ 设备 token 哈希存储；⑦ `X-Api-Key` 轮换；⑧ 设备 token 自动轮换与证书固定；⑨ 客户端删除 ASR 完成后的音频；⑩ 设备系统时间校准与 TLS 证书链校验；⑪ 旧端 HTTP 入口关闭与安全验收~~ **2026-11-19 用户决定取消，不纳入后续规划** | — | — |
 | **P2** | ⑫ 设备证书（mTLS）或请求签名（`X-Signature` + `X-Timestamp` + `nonce`）；⑬ 硬件序列号/安全元件身份；⑭ 数据导出二次授权 | A + 设备 | 高（设备需重新烧录证书或读取硬件标识） |
 
 > **D12 已调整（v1.3）：TLS 从 P0 移出。**
@@ -3440,11 +3440,11 @@ stateDiagram-v2
 | **I2** | 变更判定与分级 | R1 `firmware_version` 变化→INFO；版本号**回退**→WARN；R2 `capabilities` 新增→INFO，**减少**→WARN；R3 `model`/`manufacturer` 变化→**HIGH**；R4 注册源 IP 与历史最近一次不同→WARN（IP 不固定，仅提示）；R5 `device_name` 变化→INFO | **P0** | 无法区分「正常换型」与「伪造注册」，需人工确认 |
 | **I3** | 变更处置 | **注册仍成功**（保持幂等，返回原 token），但同时：写 `device_audit_events`、置 `identity_changed_at`、响应头 `X-Identity-Warning: changed`、HIGH 级触发告警 | **P0** | 不阻断，冒用者仍可继续上报（这是接受的风险） |
 | **I4** | token 与设备强绑定 | token 与 `device_id` 1:1（现有 `device_token UNIQUE` 已保证）；注册幂等返回**同一** token；**禁止客户端自带 token**；同一 token 出现在另一 `device_id` 的请求中 → 401 + CRITICAL 审计 | **P0** | token 明文存储（M9 哈希化在 P1） |
-| **I5** | token 轮换 | 新增 `POST /devices/{id}/rotate-token`（`X-App-Key`）：原子替换 token，**旧 token 立即失效**，新明文仅返回一次，记 `token_rotated_at` | **P0（接口）/ P1（设备自动）** | P0 设备无法自动接收新 token → 需人工改配置并重启 |
+| **I5** | token 轮换 | 新增 `POST /devices/{id}/rotate-token`（`X-Api-Key`）：原子替换 token，**旧 token 立即失效**，新明文仅返回一次，记 `token_rotated_at` | **P0（接口）/ P1（设备自动）** | P0 设备无法自动接收新 token → 需人工改配置并重启 |
 | **I6** | 配置复制 / 换机识别 | 同一 `device_id` 在 10 分钟内从 **≥2 个不同公网 IP** 心跳或上传 → 记 `possible_clone`（WARN）；同一 token 在 10 分钟内出现 **≥3 个 IP** → WARN；命中后人工确认，确认即轮换 token 使复制体失效 | **P0（检测）/ P1（自动处置）** | 同 IP 双开、离线复制、NAT 后多设备**无法检测** |
 | **I7** | 异常注册门槛 | 同一源 IP 5 分钟内新注册 `device_id` ≥3 → WARN；≥10 → WARN + 人工核查。**P0 不硬阻断**（设备启动即注册，429 会导致采集失败且设备不重试） | **P0** | 可被慢速批量注册绕过 |
 | **I8** | 异常上传门槛 | 单设备 1 分钟内 401/403/409 ≥20 → WARN；单次 timeline > 50000 条或 body > 5MB → 记录；同一 `session_id` 被 ≥2 个 token 尝试 → **CRITICAL** | **P0** | 低频慢速滥用无法及时发现 |
-| **I9** | 吊销与重新注册 | 新增 `POST /devices/{id}/revoke`（`X-App-Key`）：置 `token_revoked_at`，token 立即 401；被吊销设备注册返回 403 `DEVICE_REVOKED`；恢复须 `POST /devices/{id}/reinstate` 生成新 token | **P0** | 设备不重试、只留底 → 吊销后需**人工到场**处理（业务中断风险） |
+| **I9** | 吊销与重新注册 | 新增 `POST /devices/{id}/revoke`（`X-Api-Key`）：置 `token_revoked_at`，token 立即 401；被吊销设备注册返回 403 `DEVICE_REVOKED`；恢复须 `POST /devices/{id}/reinstate` 生成新 token | **P0** | 设备不重试、只留底 → 吊销后需**人工到场**处理（业务中断风险） |
 | **I10** | 审计落库 | 新建 `device_audit_events`：`event_type`（register_changed/clone_suspected/token_rotated/device_revoked/auth_failed_burst/upload_anomaly）、`severity`、`source_ip`、`detail`(JSON)、`created_at` | **P0（M13）** | 审计表本身需防篡改（P2 再谈） |
 | **I11** | 设备端自动轮换 / 证书固定 | 注册与心跳响应携带 token 版本；设备原子落盘并切换；HTTPS 证书固定 | **P1** | 需设备端改造与重新烧录 |
 | **I12** | 硬件身份 | 读取 SN / 安全元件，新增 `hardware_serial`（不改 `device_id` 语义） | **P2** | 依赖设备 OS 是否暴露稳定标识（AD-4） |
@@ -3454,7 +3454,7 @@ stateDiagram-v2
 | 不做 | 原因 | 风险 |
 | --- | --- | --- |
 | 设备端上报硬件指纹（MAC/CPU ID） | 设备端当前完全不读硬件标识（AD-4），且 MAC 可伪造 | 无（本来也拿不到） |
-| 注册强制 `X-App-Key` | 会破坏设备启动注册流程（设备只带自身 token 逻辑） | 注册入口仍可被匿名调用，靠 I7 限流与审计缓解 |
+| 注册强制 `X-Api-Key` | 会破坏设备启动注册流程（设备只带自身 token 逻辑） | 注册入口仍可被匿名调用，靠 I7 限流与审计缓解 |
 | P0 强制 mTLS | 设备无证书分发与轮换能力 | 中间人仍可窃取 token（原安全专项已取消，TLS 不再实施，该风险未关闭） |
 | 阻止配置复制 | 无硬件凭据，服务端无法区分真机与复制体 | 复制体可冒用身份上报（I6 只能检测，不能阻止） |
 
@@ -3558,8 +3558,8 @@ stateDiagram-v2
 
 | 位置 | 要求 |
 | --- | --- |
-| Nginx | access log **不记录** `Authorization` / `X-Device-Token` / `X-App-Key`；只记方法、路径、状态码、耗时、脱敏 IP |
-| 服务器 A | 设备 token、`X-App-Key`、答案文本、转写文本**不得**出现在 INFO 及以上日志；异常日志只记 token 前 4 位 + 长度 |
+| Nginx | access log **不记录** `Authorization` / `X-Device-Token` / `X-Api-Key`（含旧名 `X-App-Key`）；只记方法、路径、状态码、耗时、脱敏 IP |
+| 服务器 A | 设备 token、`X-Api-Key`（含旧名 `X-App-Key`）、答案文本、转写文本**不得**出现在 INFO 及以上日志；异常日志只记 token 前 4 位 + 长度 |
 | Flutter | 移除 token 与响应体打印；错误上报不含答案与转写 |
 | 设备端 | 不打印 token；留底文件权限 `600` |
 
@@ -3707,7 +3707,7 @@ P0 的判定标准：**不做它，后面每接一个模态都要返工**。
 
 **新增硬约束（D3/D12）**
 
-1. **不得**为了「更严」把注册接口改成必须 `X-App-Key` —— 设备启动即注册，会造成在役设备无法上线；
+1. **不得**为了「更严」把注册接口改成必须 `X-Api-Key` —— 设备启动即注册，会造成在役设备无法上线；
 2. ~~**安全专项切换 TLS 时不得同时关闭 8000**~~ —— 该专项已于 2026-11-19 取消，此项不再适用；
 3. 任何「异常即拒绝」的身份规则都必须先评估设备端**不重试**特性（AD-5）：拒绝等于丢数据；
 4. `device_audit_events` 只记录**可观测事实**（载荷、IP、token 指纹），不得记录 token 明文；
@@ -4025,7 +4025,7 @@ sqlite3 /opt/backup/psychology-YYYYmmdd-HHMMSS.db "PRAGMA integrity_check;"
 | AC-24 | `revoke` 后设备再注册 / 再上传 | 注册 403 `DEVICE_REVOKED`；上传 401；`reinstate` 后新 token 可用 | P0 |
 | AC-25 | 公网 `https://api.<域名>/api/v1/health` 与上传接口 | 443 正常、证书链有效、TLS 1.2/1.3；`http://<域名>` 301 到 https（**已取消，原 P1 安全专项**） | — |
 | AC-26 | 旧固件（仅 http、硬编码 8000）在过渡期上传 | 200 成功；非白名单路径 404；审计记录旧端流量；响应头 `X-Protocol-Required: https`（**已取消，原 P1 安全专项**） | — |
-| AC-27 | 检查 A 应用日志 | **不含** `Authorization`/`X-Device-Token`/`X-App-Key`/答案/转写原文（**日志脱敏仍属 P0 强制项**；Nginx access log 不再纳入） | P0 |
+| AC-27 | 检查 A 应用日志 | **不含** `Authorization`/`X-Device-Token`/`X-Api-Key`（含旧名 `X-App-Key`）/答案/转写原文（**日志脱敏仍属 P0 强制项**；Nginx access log 不再纳入） | P0 |
 | AC-28 | 证书过期或 TLS 握手失败（模拟） | 客户端**不降级**到 http；直接失败并留底；告警可见（**已取消，原 P1 安全专项**） | — |
 | AC-29 | 同步请求携带 `score_list`，或携带 `radar_charts.chart1_phq9_items`（真实样本形态） | 422 `FORBIDDEN_FIELD`；**不得因缺少该图而报错**（缺 `chart1` 是正常请求） | P0 |
 | AC-30 | 按 §14.2.1 用真实样本（`session_id=1742`，仅 `chart2`+`chart3`）构造请求 | 201；`dimensions` 恰 7 项；`radar_norm.series[chart2]` 的 `norm=0.2233/0.6667/0.3333` 且 `unit_max_source=bank_scores`；`series[chart3].norm_status=unit_max_unknown` 且 `norm` 全 `null`；`scoring_mode=option`、`state_update_status=scheduled` 均已入库 | P0 |
@@ -4696,6 +4696,20 @@ sqlite3 /opt/backup/psychology-YYYYmmdd-HHMMSS.db "PRAGMA integrity_check;"
 4. **多模态预留不建表**：`session_type` 已含 `physiological`，`session_devices` 支持多设备，规范只定「类型标识 / 时间原点 / 单位 / 连续流 vs 离散结果」；ECG 建议「元数据表 + 分段文件」，P1 不落地。
 
 **边界**：仅文档调整，不改代码、库表与生产配置；本轮核实仅执行只读 `SELECT` 与文件读取。
+
+### C.12 v1.4 补充修订（2026-11-21）—— API 密钥合并为一把 `X-Api-Key`
+
+**决策人**：用户（项目负责人）。
+
+**决策**：原 `X-App-Key`（设备管理）与 `X-Api-Key`（查询/导出）合并为**唯一密钥**，取值统一为 `QUERY_API_KEY`（环境变量），代码中删除 `app_key` 配置项。
+
+**原因**：`X-App-Key` 仅被 3 个设备管理 POST（`rotate-token` / `revoke` / `reinstate`）强制要求，其余接口（含 `GET /devices/{device_id}`）已支持 `X-Api-Key`；Flutter 侧查询、设备绑定、导出均只发 `X-Api-Key`，写入侧不校验 App Key，`atlas_001` 只用设备 token。维护两把密钥没有安全收益，反而增加轮换与配置成本。
+
+**兼容性**：`X-App-Key` 保留为 `X-Api-Key` 的**同值兼容别名**（请求头名兼容，取值必须是同一把密钥），供运维既有脚本过渡；旧值 `change-me-app-key` 立即失效。文档与示例统一写 `X-Api-Key`。
+
+**同步修改**：§12.1 认证表、§12.2 D-3/D-4/D-6、§12.3 S-1/S-2/S-3/S-4、§12.4 U-2/U-4、§12.5、§13 兼容矩阵、§17.2、§17.4 I5/I9、§17.5.7 日志脱敏、§21 AC-27、附录 D 相关表述；P0 两份清单中的示例同步改为 `X-Api-Key`。
+
+**边界**：仅代码与文档调整，不改数据库结构；生产 `.env` 仍沿用现有 `QUERY_API_KEY` 取值，不轮换。
 
 ---
 

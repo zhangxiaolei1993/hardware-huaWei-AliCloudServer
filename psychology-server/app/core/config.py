@@ -18,9 +18,9 @@ class Settings(BaseSettings):
 
     secret_key: str = "change-me-to-a-random-string"
 
-    # 设备管理接口密钥（X-App-Key，§17.4 I5/I9）；生产必须在 .env 覆盖
-    app_key: str = "change-me-app-key"
-    # 查询接口密钥（X-Api-Key，P0-17 / AC-15）；生产必须在 .env 覆盖，不落库、不进日志
+    # 唯一 API 密钥（X-Api-Key，P0-17 / AC-15 / §17.4 I5/I9）；
+    # 查询、科研导出与设备管理接口共用；生产必须在 .env 覆盖，不落库、不进日志。
+    # X-App-Key 仅为兼容别名，取值与本项相同。
     query_api_key: str = "change-me-query-key"
     # 受试者脱敏标识 HMAC 盐（P0-9 / M7）；生产必须在 .env 覆盖
     research_salt: str = "change-me-research-salt"

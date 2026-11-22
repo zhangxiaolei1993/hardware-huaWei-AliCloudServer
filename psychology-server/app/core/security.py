@@ -27,15 +27,24 @@ def client_ip(request: Request) -> Optional[str]:
     return request.client.host if request.client else None
 
 
+def _api_key_matches(provided: Optional[str]) -> bool:
+    """校验密钥是否为唯一的 ``query_api_key``。"""
+    expected = get_settings().query_api_key
+    return bool(expected and provided and hmac.compare_digest(expected, provided))
+
+
 def require_app_key(
     x_app_key: Optional[str] = Header(default=None, alias="X-App-Key"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
 ) -> None:
-    """设备管理接口的应用认证（§17.4 I5/I9）。"""
-    expected = get_settings().app_key
-    if not expected or not x_app_key or not hmac.compare_digest(expected, x_app_key):
+    """设备管理接口认证（§17.4 I5/I9）：统一使用 ``query_api_key``。
+
+    ``X-App-Key`` 仅作为 ``X-Api-Key`` 的兼容别名保留，两者取值相同。
+    """
+    if not (_api_key_matches(x_api_key) or _api_key_matches(x_app_key)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid or missing X-App-Key",
+            detail="UNAUTHORIZED: invalid or missing X-Api-Key",
         )
 
 
@@ -43,8 +52,7 @@ def require_api_key(
     x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
 ) -> None:
     """查询接口基础鉴权（P0-17 / AC-15）：设备列表、会话查询、结果查询。"""
-    expected = get_settings().query_api_key
-    if not expected or not x_api_key or not hmac.compare_digest(expected, x_api_key):
+    if not _api_key_matches(x_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="UNAUTHORIZED: invalid or missing X-Api-Key",
@@ -148,13 +156,14 @@ def get_device_reader(
     x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
     db: DBSession = Depends(get_db),
 ) -> Optional[Device]:
-    """设备详情读取认证（§12.2 D-4）：设备 token / X-App-Key / X-Api-Key 三者任一。
+    """设备详情读取认证（§12.2 D-4）：设备 token 或 `X-Api-Key` 二者任一。
 
     - 带任一设备头（X-Device-Id / X-Device-Token）时，必须通过设备凭证校验：
       无效或已吊销一律 401，设备端据此触发重新注册；返回 Device 供路由校验
       `{device_id}` 与 `X-Device-Id` 一致（不一致 → 403）。
-    - 仅带合法 X-App-Key / X-Api-Key 时返回 None（手机/查询侧合法调用）。
-    - 三者都缺失或均无效 → 401。
+    - 仅带合法 X-Api-Key（`X-App-Key` 为兼容别名，取值相同）时返回 None
+      （手机/查询侧合法调用）。
+    - 两者都缺失或均无效 → 401。
     """
     if x_device_id or x_device_token:
         return get_current_device(
@@ -164,22 +173,11 @@ def get_device_reader(
             db=db,
         )
 
-    settings = get_settings()
-    if (
-        x_app_key
-        and settings.app_key
-        and hmac.compare_digest(settings.app_key, x_app_key)
-    ):
-        return None
-    if (
-        x_api_key
-        and settings.query_api_key
-        and hmac.compare_digest(settings.query_api_key, x_api_key)
-    ):
+    if _api_key_matches(x_api_key) or _api_key_matches(x_app_key):
         return None
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="UNAUTHORIZED: missing device credentials or X-App-Key/X-Api-Key",
+        detail="UNAUTHORIZED: missing device credentials or X-Api-Key",
     )
 
 
