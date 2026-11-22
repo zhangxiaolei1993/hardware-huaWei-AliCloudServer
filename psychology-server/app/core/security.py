@@ -3,7 +3,7 @@ import hmac
 import secrets
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException, Query, Request, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
@@ -33,19 +33,24 @@ def _api_key_matches(provided: Optional[str]) -> bool:
     return bool(expected and provided and hmac.compare_digest(expected, provided))
 
 
+# 仅用于 Swagger「Try it out」预填；鉴权始终读取真实请求头，不会因此放行。
+_DOC_API_KEY = "change-me-query-key"
+
+
 def require_app_key(
-    x_api_key: Optional[str] = Header(
-        default=None,
+    request: Request,
+    _x_api_key: str = Header(
+        default=_DOC_API_KEY,
         alias="X-Api-Key",
         description="唯一 API 密钥（与 QUERY_API_KEY 一致）",
-        examples=["change-me-query-key"],
+        examples=[_DOC_API_KEY],
     ),
 ) -> None:
     """设备管理接口认证（§17.4 I5/I9）：统一使用 ``query_api_key``（`X-Api-Key`）。
 
     旧的 `X-App-Key` 头已不再接受，也不出现在 OpenAPI/Swagger 中。
     """
-    if not _api_key_matches(x_api_key):
+    if not _api_key_matches(request.headers.get("X-Api-Key")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="UNAUTHORIZED: invalid or missing X-Api-Key",
@@ -53,15 +58,16 @@ def require_app_key(
 
 
 def require_api_key(
-    x_api_key: Optional[str] = Header(
-        default=None,
+    request: Request,
+    _x_api_key: str = Header(
+        default=_DOC_API_KEY,
         alias="X-Api-Key",
         description="唯一 API 密钥（与 QUERY_API_KEY 一致）",
-        examples=["change-me-query-key"],
+        examples=[_DOC_API_KEY],
     ),
 ) -> None:
     """查询接口基础鉴权（P0-17 / AC-15）：设备列表、会话查询、结果查询。"""
-    if not _api_key_matches(x_api_key):
+    if not _api_key_matches(request.headers.get("X-Api-Key")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="UNAUTHORIZED: invalid or missing X-Api-Key",
@@ -69,26 +75,19 @@ def require_api_key(
 
 
 def require_research_api_key(
-    x_api_key: Optional[str] = Header(
-        default=None,
+    request: Request,
+    _x_api_key: str = Header(
+        default=_DOC_API_KEY,
         alias="X-Api-Key",
-        description="唯一 API 密钥（与 QUERY_API_KEY 一致）",
-        examples=["change-me-query-key"],
-    ),
-    api_key: Optional[str] = Query(
-        default=None,
-        description="API 密钥；与 `X-Api-Key` 头二选一，仅用于浏览器直接下载",
-        examples=["change-me-query-key"],
+        description="唯一 API 密钥（与 QUERY_API_KEY 一致）；仅此一种传递方式",
+        examples=[_DOC_API_KEY],
     ),
 ) -> None:
-    """科研导出 GET 接口鉴权：优先 ``X-Api-Key``，其次 ``?api_key=``。
+    """科研导出 GET 接口鉴权：仅接受 ``X-Api-Key`` 请求头。
 
-    查询参数仅供内网/本人浏览器直接点击下载使用，会被访问日志记录；
-    不要在其他业务接口上启用。
+    已移除 ``?api_key=`` 查询参数，避免密钥进入访问日志与浏览器历史。
     """
-    expected = get_settings().query_api_key
-    provided = x_api_key or api_key
-    if not expected or not provided or not hmac.compare_digest(expected, provided):
+    if not _api_key_matches(request.headers.get("X-Api-Key")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="UNAUTHORIZED: invalid or missing X-Api-Key",
@@ -186,11 +185,11 @@ def get_device_reader(
         description="设备 token（设备自检时携带）",
         examples=["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
     ),
-    x_api_key: Optional[str] = Header(
-        default=None,
+    x_api_key: str = Header(
+        default=_DOC_API_KEY,
         alias="X-Api-Key",
         description="唯一 API 密钥（手机/查询侧调用）",
-        examples=["change-me-query-key"],
+        examples=[_DOC_API_KEY],
     ),
     db: DBSession = Depends(get_db),
 ) -> Optional[Device]:
@@ -210,7 +209,7 @@ def get_device_reader(
             db=db,
         )
 
-    if _api_key_matches(x_api_key):
+    if _api_key_matches(request.headers.get("X-Api-Key")):
         return None
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

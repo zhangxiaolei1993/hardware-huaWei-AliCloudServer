@@ -331,20 +331,21 @@ def test_export_by_beijing_time_range(client, tmp_path):
     assert resp.status_code == 422
 
 
-def test_api_key_query_parameter_for_get_endpoints(client, tmp_path):
+def test_api_key_query_parameter_rejected(client, tmp_path):
+    """?api_key= 已移除；GET 接口只接受 X-Api-Key 请求头。"""
     sid = "s-api-querykey-0001"
     _seed_session(sid, LATE, [(0.5, "neutral")])
 
     resp = client.get("/api/v1/research/sessions", params={"api_key": API_KEY})
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 401, resp.text
 
     resp = client.get(
         f"/api/v1/research/sessions/{sid}/export", params={"api_key": API_KEY}
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 401, resp.text
 
     resp = client.get("/api/v1/research/export/all", params={"api_key": API_KEY})
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 401, resp.text
 
-    resp = client.get("/api/v1/research/sessions", params={"api_key": "wrong"})
-    assert resp.status_code == 401
+    resp = client.get("/api/v1/research/sessions", headers=HEADERS)
+    assert resp.status_code == 200, resp.text

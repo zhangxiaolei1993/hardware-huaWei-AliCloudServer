@@ -3,9 +3,9 @@
 服务地址 `http://8.140.240.43:8000`，所有请求带密钥头
 `X-Api-Key: change-me-query-key`（实际以服务器 `.env` 的 `QUERY_API_KEY` 为准）。
 
-> Windows 用 `curl.exe`；密钥只放请求头。浏览器直接下载可在 URL 后加
-> `?api_key=<密钥>`，但查询串会进访问日志和浏览器历史，仅限内网/本人使用，
-> 不要用在其他业务接口上。
+> Windows 用 `curl.exe`；**密钥只放请求头 `X-Api-Key`**，不再支持
+> `?api_key=` 查询参数（避免密钥进入访问日志和浏览器历史）。
+> 浏览器测试请打开 `http://8.140.240.43:8000/docs`，`X-Api-Key` 已预填默认值。
 
 ## 一、四条常用命令
 
@@ -23,12 +23,13 @@ curl.exe -H "X-Api-Key: change-me-query-key" -o all.zip "http://8.140.240.43:800
 curl.exe -H "X-Api-Key: change-me-query-key" -o range.zip "http://8.140.240.43:8000/api/v1/research/export?from=2026-11-19&to=2026-11-19"
 ```
 
-浏览器直接点：
+浏览器直接测试：
 
 ```text
-http://8.140.240.43:8000/api/v1/research/sessions?api_key=change-me-query-key
-http://8.140.240.43:8000/api/v1/research/export/all?api_key=change-me-query-key
+http://8.140.240.43:8000/docs
 ```
+
+在 Swagger 中展开接口，`X-Api-Key` 已预填 `change-me-query-key`，直接点 Execute 即可。
 
 四条命令都返回 zip（会话清单除外），解压后结构见附录 A。
 
@@ -45,7 +46,7 @@ http://8.140.240.43:8000/api/v1/research/export/all?api_key=change-me-query-key
 | `GET /research/export` | `from`/`to` | 否 | **北京时间**；日期 `2026-11-19` 或 ISO8601；`to` 为日期时含当天 23:59:59 | 格式错或 from 晚于 to → 422 |
 | `POST /research/exports` | 见附录 D | - | 需要按 UTC/类型/格式精细筛选时用 | 参数冲突 → 422 |
 
-`api_key` 查询参数仅上述四个 GET 接口支持；`POST` 仍只认请求头。
+所有接口都只接受 `X-Api-Key` 请求头（含 `POST`）。
 
 ## 三、会话清单返回什么
 

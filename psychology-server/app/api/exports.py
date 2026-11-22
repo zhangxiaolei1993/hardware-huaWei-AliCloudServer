@@ -229,7 +229,7 @@ def create_research_export(req: ResearchExportRequest) -> FileResponse:
     summary="列出可导出的会话（挑 S1）",
     description=(
         "返回全部会话清单，含 S1、北京时间起止、状态、来源、N1、表情条数、"
-        "事件条数与是否有结果（需 `X-Api-Key`，也支持 `?api_key=`）。\n\n"
+        "事件条数与是否有结果（需 `X-Api-Key`）。\n\n"
         "按开始时间倒序；可直接把 `session_id` 填进单会话导出接口。"
     ),
     dependencies=[Depends(require_research_api_key)],
@@ -244,7 +244,7 @@ def list_research_sessions() -> Any:
     summary="一键全量导出（zip，无参数）",
     description=(
         "导出全部会话的全部数据类型，CSV+JSONL，直接返回 zip"
-        "（需 `X-Api-Key`，也支持 `?api_key=`）。"
+        "（需 `X-Api-Key`）。"
     ),
     dependencies=[Depends(require_research_api_key)],
 )
@@ -258,7 +258,7 @@ def export_all_research() -> FileResponse:
     summary="按北京时间段导出全部会话（zip）",
     description=(
         "只接受 `from` / `to` 两个北京时间参数，导出时段内所有会话的全部数据；"
-        "可只给一个，都不给等同全量（需 `X-Api-Key`，也支持 `?api_key=`）。\n\n"
+        "可只给一个，都不给等同全量（需 `X-Api-Key`）。\n\n"
         "- 日期可写 `2026-11-01`（`to` 含当天 23:59:59）或 ISO8601；\n"
         "- 不带时区按北京时间 UTC+8 理解；格式错误或 from 晚于 to 返回 422。"
     ),
@@ -293,8 +293,7 @@ def export_research_by_time(
     "/research/sessions/{session_id}/export",
     summary="导出单场会话科研数据（zip）",
     description=(
-        "单会话导出，口径与 `POST /research/exports` 相同（需 `X-Api-Key`，"
-        "也支持 `?api_key=`）。\n\n"
+        "单会话导出，口径与 `POST /research/exports` 相同（需 `X-Api-Key`）。\n\n"
         "不填参数即导出全部数据类型、CSV+JSONL；`data_types` 用逗号分隔；"
         "会话不存在返回 404。"
     ),
