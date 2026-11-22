@@ -60,33 +60,50 @@ class ResearchExportRequest(BaseModel):
 
     session_ids: List[str] = Field(
         default_factory=list,
+        examples=[["s_20261119_ab12cd34"]],
         description="会话号 S1 列表；与 export_all=true 二选一",
     )
     export_all: bool = Field(
-        default=False, description="导出全部会话（受时间范围约束）"
+        default=False, examples=[False], description="导出全部会话（受时间范围约束）"
     )
     from_utc: Optional[str] = Field(
-        default=None, description="会话起始时间下界（ISO8601，含）"
+        default=None,
+        examples=["2026-11-01T00:00:00Z"],
+        description="会话起始时间下界（ISO8601，含）",
     )
     to_utc: Optional[str] = Field(
-        default=None, description="会话起始时间上界（ISO8601，含）"
+        default=None,
+        examples=["2026-11-30T23:59:59Z"],
+        description="会话起始时间上界（ISO8601，含）",
     )
     from_seconds: Optional[float] = Field(
-        default=None, description="行级 relative_seconds 下界（含）"
+        default=None, examples=[0.0], description="行级 relative_seconds 下界（含）"
     )
     to_seconds: Optional[float] = Field(
-        default=None, description="行级 relative_seconds 上界（含）"
+        default=None, examples=[120.0], description="行级 relative_seconds 上界（含）"
     )
     data_types: List[DataTypes] = Field(
         default_factory=lambda: list(DEFAULT_DATA_TYPES),
+        examples=[["timeline", "emotion", "results", "snapshots", "batches"]],
         description="数据类型子集：timeline/emotion/results/snapshots/batches；"
         "sessions 与 session_devices 始终导出",
     )
     format: ExportFormat = Field(
-        default="both", description="csv / jsonl / both（两者同时输出）"
+        default="both",
+        examples=["both"],
+        description="csv / jsonl / both（两者同时输出）",
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "session_ids": ["s_20261119_ab12cd34"],
+                "data_types": ["timeline", "emotion", "results", "snapshots", "batches"],
+                "format": "both",
+            }
+        },
+    )
 
     @model_validator(mode="after")
     def _validate_filters(self) -> "ResearchExportRequest":

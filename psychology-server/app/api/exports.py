@@ -10,9 +10,9 @@
 """
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional
+from typing import Annotated, Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session as DBSession
 from starlette.background import BackgroundTask
@@ -65,7 +65,7 @@ def get_manifest(session_id: str, db: DBSession = Depends(get_db)) -> Any:
     dependencies=[Depends(require_api_key)],
 )
 def create_export(
-    session_id: str,
+    session_id: Annotated[str, Path(examples=["s_20261119_ab12cd34"], description="会话号 S1")],
     req: ExportCreateRequest,
     db: DBSession = Depends(get_db),
 ) -> Any:
@@ -88,8 +88,10 @@ def create_export(
     dependencies=[Depends(require_api_key)],
 )
 def get_export(
-    export_id: str,
-    download: bool = Query(default=False),
+    export_id: Annotated[str, Path(examples=["exp_20261119_ab12cd34"], description="导出任务 ID")],
+    download: bool = Query(
+        default=False, examples=[False], description="true 时直接下载数据文件"
+    ),
     db: DBSession = Depends(get_db),
 ) -> Any:
     try:
@@ -263,8 +265,17 @@ def export_all_research() -> FileResponse:
     dependencies=[Depends(require_research_api_key)],
 )
 def export_research_by_time(
-    from_: Optional[str] = Query(default=None, alias="from"),
-    to: Optional[str] = Query(default=None, alias="to"),
+    from_: Optional[str] = Query(
+        default=None,
+        alias="from",
+        examples=["2026-11-19"],
+        description="起始时间（北京时间）；支持 YYYY-MM-DD 或 ISO8601；不填＝不限",
+    ),
+    to: Optional[str] = Query(
+        default=None,
+        examples=["2026-11-20"],
+        description="结束时间（北京时间）；YYYY-MM-DD 含当天 23:59:59；不填＝不限",
+    ),
 ) -> FileResponse:
     start = _parse_beijing_time(from_, "from")
     end = _parse_beijing_time(to, "to", end_of_day=True)
@@ -290,12 +301,20 @@ def export_research_by_time(
     dependencies=[Depends(require_research_api_key)],
 )
 def export_research_session(
-    session_id: str,
-    format: ExportFormat = Query(default="both", description="csv/jsonl/both"),
-    from_seconds: Optional[float] = Query(default=None),
-    to_seconds: Optional[float] = Query(default=None),
+    session_id: Annotated[str, Path(examples=["s_20261119_ab12cd34"], description="会话号 S1")],
+    format: ExportFormat = Query(
+        default="both", examples=["both"], description="csv / jsonl / both"
+    ),
+    from_seconds: Optional[float] = Query(
+        default=None, examples=[0.0], description="行级 relative_seconds 下界（含）"
+    ),
+    to_seconds: Optional[float] = Query(
+        default=None, examples=[120.0], description="行级 relative_seconds 上界（含）"
+    ),
     data_types: Optional[str] = Query(
-        default=None, description="逗号分隔：timeline,emotion,results,snapshots,batches"
+        default=None,
+        examples=["timeline,emotion,results,snapshots,batches"],
+        description="逗号分隔：timeline,emotion,results,snapshots,batches",
     ),
 ) -> FileResponse:
     if (

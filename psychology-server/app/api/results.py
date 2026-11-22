@@ -1,7 +1,7 @@
 """测评结果同步 API（v1.4 §12.4 U-4 / §14.4）。"""
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Response
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.security import get_optional_device
@@ -28,9 +28,19 @@ router = APIRouter(prefix="/sessions", tags=["results"])
     ),
 )
 def sync_result(
-    session_id: str,
+    session_id: Annotated[str, Path(examples=["s_20261119_ab12cd34"], description="会话号 S1")],
     response: Response,
-    payload: Dict[str, Any] = Body(...),
+    payload: Dict[str, Any] = Body(
+        ...,
+        examples=[
+            {
+                "questionnaire_code": "PHQ9",
+                "result_version": 1,
+                "series": [{"unit_max": 3, "score": 12}],
+                "source_payload_sha256": "0" * 64,
+            }
+        ],
+    ),
     db: DBSession = Depends(get_db),
     device: Optional[Device] = Depends(get_optional_device),
 ) -> Any:

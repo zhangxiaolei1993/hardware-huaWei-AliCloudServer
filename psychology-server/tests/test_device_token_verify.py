@@ -5,16 +5,11 @@
 - token 错误 / 已轮换 / 已吊销 → 401（设备据此重新注册）
 - token 与路径 device_id 不一致 → 403
 - 无任何凭证 → 401
-- X-Api-Key 合法调用 → 200，错误 key → 401；X-App-Key 为同值兼容别名
+- X-Api-Key 合法调用 → 200，错误 key → 401；X-App-Key 已不再接受（含正确值）
 """
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
-
-
-def _app_headers() -> dict:
-    """旧头名 X-App-Key 作为 X-Api-Key 的别名，取值相同。"""
-    return {"X-App-Key": get_settings().query_api_key}
 
 
 def _api_headers() -> dict:
@@ -67,7 +62,7 @@ def test_rotated_old_token_returns_401_and_new_token_works(client: TestClient):
     old_token = _register(client, dev)
 
     rotated = client.post(
-        f"/api/v1/devices/{dev}/rotate-token", headers=_app_headers()
+        f"/api/v1/devices/{dev}/rotate-token", headers=_api_headers()
     )
     assert rotated.status_code == 200, rotated.text
     new_token = rotated.json()["device_token"]
@@ -92,7 +87,7 @@ def test_revoked_token_returns_401(client: TestClient):
     dev = "verify_dev_revoked"
     token = _register(client, dev)
 
-    revoked = client.post(f"/api/v1/devices/{dev}/revoke", headers=_app_headers())
+    revoked = client.post(f"/api/v1/devices/{dev}/revoke", headers=_api_headers())
     assert revoked.status_code == 200, revoked.text
 
     resp = client.get(f"/api/v1/devices/{dev}", headers=_device_headers(dev, token))
@@ -134,16 +129,15 @@ def test_missing_credentials_returns_401(client: TestClient):
     )
 
 
-def test_app_key_alias_and_api_key_can_read(client: TestClient):
+def test_api_key_can_read(client: TestClient):
     dev = "verify_dev_keys"
     _register(client, dev)
 
-    assert client.get(f"/api/v1/devices/{dev}", headers=_app_headers()).status_code == 200
     assert client.get(f"/api/v1/devices/{dev}", headers=_api_headers()).status_code == 200
 
 
 def test_api_key_works_on_management_endpoint(client: TestClient):
-    """管理接口统一用 X-Api-Key；X-App-Key 同值别名同样可用。"""
+    """管理接口统一用 X-Api-Key。"""
     dev = "verify_dev_mgmt_key"
     _register(client, dev)
 
@@ -152,13 +146,28 @@ def test_api_key_works_on_management_endpoint(client: TestClient):
         == 200
     )
     assert (
-        client.post(f"/api/v1/devices/{dev}/revoke", headers=_app_headers()).status_code
+        client.post(f"/api/v1/devices/{dev}/revoke", headers=_api_headers()).status_code
         == 200
     )
 
 
+def test_legacy_app_key_header_rejected(client: TestClient):
+    """X-App-Key 已彻底移除：即使取值正确也不再接受（详情与管理接口均 401）。"""
+    dev = "verify_dev_legacy_header"
+    _register(client, dev)
+    correct_value = {"X-App-Key": get_settings().query_api_key}
+
+    assert client.get(f"/api/v1/devices/{dev}", headers=correct_value).status_code == 401
+    assert (
+        client.post(
+            f"/api/v1/devices/{dev}/rotate-token", headers=correct_value
+        ).status_code
+        == 401
+    )
+
+
 def test_legacy_app_key_value_rejected(client: TestClient):
-    """旧值 change-me-app-key 已失效：读详情与管理接口均 401。"""
+    """旧值 change-me-app-key 已失效：读写均 401。"""
     dev = "verify_dev_legacy_key"
     _register(client, dev)
     legacy = {"X-App-Key": "change-me-app-key"}

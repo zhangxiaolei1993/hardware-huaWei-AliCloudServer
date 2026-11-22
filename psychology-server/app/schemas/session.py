@@ -23,31 +23,41 @@ class AnchorOut(BaseModel):
 
 class SessionCreateRequest(BaseModel):
     device_id: str = Field(min_length=1, max_length=64, examples=["atlas_001"])
-    user_id: Optional[str] = Field(default=None, max_length=64)
+    user_id: Optional[str] = Field(
+        default=None, max_length=64, examples=["user_1001"]
+    )
     # P0-9：来自服务器 B 的受试者 ID；优先于 user_id 计算 subject_ref
     external_user_id: Optional[str] = Field(
         default=None,
         max_length=64,
+        examples=["subject_20261119_001"],
         description="外部系统受试者 ID（来自服务器 B）；服务器据此计算脱敏 subject_ref",
     )
-    session_type: SessionType = "emotion"
+    session_type: SessionType = Field(
+        default="emotion", examples=["emotion"], description="会话类型"
+    )
     # 不传时按 standalone 处理，保证旧客户端兼容
     source_system: Optional[SourceSystem] = Field(
         default=None,
+        examples=["standalone"],
         description="会话来源；不传＝standalone；custom 不接受客户端提交",
     )
     # 外部系统会话编号 N1：只读、原样保存；同一 N1 可关联多个 S1
     external_session_id: Optional[str] = Field(
         default=None,
         max_length=128,
+        examples=["xin_tan_tan_20261119_001"],
         description="外部系统会话编号（N1），仅 source_system != standalone 时允许",
     )
     # 创建幂等键：同 source_system + client_request_id 重复请求不重复创建
-    client_request_id: Optional[str] = Field(default=None, max_length=128)
+    client_request_id: Optional[str] = Field(
+        default=None, max_length=128, examples=["req-20261119-0001"]
+    )
     # 手机端鉴权：connect 成功后返回的 connection_id；与设备 token 二选一
     connection_id: Optional[str] = Field(
         default=None,
         max_length=64,
+        examples=["conn_20261119_ab12cd34"],
         description="手机端使用：connect 返回的有效 connection_id；设备端可留空改用请求头 token",
     )
 
@@ -97,7 +107,9 @@ class ActiveSessionResponse(BaseModel):
 
 
 class SessionStatusUpdateRequest(BaseModel):
-    status: Literal["running", "completed", "aborted"]
+    status: Literal["running", "completed", "aborted"] = Field(
+        examples=["running"], description="目标状态：running / completed / aborted"
+    )
 
 
 class SessionOut(BaseModel):
@@ -120,8 +132,12 @@ class SessionOut(BaseModel):
 
 
 class SessionDeviceBindRequest(BaseModel):
-    device_id: str = Field(min_length=1, max_length=64)
-    role: Literal["primary", "auxiliary"] = "auxiliary"
+    device_id: str = Field(
+        min_length=1, max_length=64, examples=["atlas_002"], description="要绑定的设备 ID"
+    )
+    role: Literal["primary", "auxiliary"] = Field(
+        default="auxiliary", examples=["auxiliary"], description="设备在会话中的角色"
+    )
 
 
 class SessionDeviceBindResponse(BaseModel):

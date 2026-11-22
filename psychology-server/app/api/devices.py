@@ -1,7 +1,7 @@
 """设备 API：注册 / 查询 / 心跳 / 身份保护。"""
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
@@ -84,7 +84,7 @@ def register_device(
     dependencies=[Depends(require_app_key)],
 )
 def rotate_device_token(
-    device_id: str,
+    device_id: Annotated[str, Path(examples=["atlas_001"], description="设备 ID")],
     request: Request,
     db: DBSession = Depends(get_db),
 ) -> Any:
@@ -114,7 +114,7 @@ def rotate_device_token(
     dependencies=[Depends(require_app_key)],
 )
 def revoke_device(
-    device_id: str,
+    device_id: Annotated[str, Path(examples=["atlas_001"], description="设备 ID")],
     request: Request,
     db: DBSession = Depends(get_db),
 ) -> Any:
@@ -141,7 +141,7 @@ def revoke_device(
     dependencies=[Depends(require_app_key)],
 )
 def reinstate_device(
-    device_id: str,
+    device_id: Annotated[str, Path(examples=["atlas_001"], description="设备 ID")],
     request: Request,
     db: DBSession = Depends(get_db),
 ) -> Any:
@@ -179,14 +179,14 @@ def list_devices(db: DBSession = Depends(get_db)) -> Any:
     description=(
         "按 device_id 查询设备信息。在线状态在查询时惰性判断（超过 30 秒无心跳判为 offline）。\n\n"
         "认证（§12.2 D-4）：设备 token（`X-Device-Id` + `X-Device-Token`）"
-        "或 `X-Api-Key` 任一（`X-App-Key` 为兼容别名，取值相同）。\n\n"
+        "或 `X-Api-Key` 任一。\n\n"
         "- 设备启动自检用设备 token 调用本接口；token 失效/吊销返回 401，设备据此重新注册\n"
         "- 设备 token 与 `{device_id}` 不一致返回 403\n"
         "- 响应恒不含 `device_token`"
     ),
 )
 def get_device(
-    device_id: str,
+    device_id: Annotated[str, Path(examples=["atlas_001"], description="设备 ID")],
     db: DBSession = Depends(get_db),
     caller: Optional[Device] = Depends(get_device_reader),
 ) -> Any:
@@ -258,7 +258,7 @@ def get_active_session(device_id: str, db: DBSession = Depends(get_db)) -> Any:
     ),
 )
 def heartbeat(
-    device_id: str,
+    device_id: Annotated[str, Path(examples=["atlas_001"], description="设备 ID")],
     req: HeartbeatRequest | None = None,
     db: DBSession = Depends(get_db),
     device: Device = Depends(get_current_device),
@@ -290,7 +290,7 @@ def heartbeat(
     ),
 )
 def connect_device(
-    device_id: str,
+    device_id: Annotated[str, Path(examples=["atlas_001"], description="设备 ID")],
     req: DeviceConnectRequest,
     db: DBSession = Depends(get_db),
 ) -> Any:
@@ -326,7 +326,7 @@ def connect_device(
     ),
 )
 def disconnect_device(
-    device_id: str,
+    device_id: Annotated[str, Path(examples=["atlas_001"], description="设备 ID")],
     req: DeviceDisconnectRequest | None = None,
     db: DBSession = Depends(get_db),
 ) -> Any:

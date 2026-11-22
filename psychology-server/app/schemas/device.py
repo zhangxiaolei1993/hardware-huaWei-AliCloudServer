@@ -9,11 +9,19 @@ class DeviceRegisterRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     device_id: str = Field(min_length=1, max_length=64, examples=["atlas_001"])
-    device_name: str = Field(min_length=1, max_length=128)
+    device_name: str = Field(
+        min_length=1, max_length=128, examples=["Atlas 001 开发板"]
+    )
     device_type: str = Field(min_length=1, max_length=64, examples=["edge_ai_device"])
-    manufacturer: Optional[str] = Field(default=None, max_length=64)
-    model: Optional[str] = Field(default=None, max_length=128)
-    firmware_version: Optional[str] = Field(default=None, max_length=64)
+    manufacturer: Optional[str] = Field(
+        default=None, max_length=64, examples=["Huawei"]
+    )
+    model: Optional[str] = Field(
+        default=None, max_length=128, examples=["Atlas 200I DK A2"]
+    )
+    firmware_version: Optional[str] = Field(
+        default=None, max_length=64, examples=["1.0.0"]
+    )
     capabilities: List[str] = Field(default_factory=list, examples=[["emotion"]])
 
 
@@ -46,7 +54,9 @@ class DeviceOut(BaseModel):
 class HeartbeatRequest(BaseModel):
     """心跳可为空 body，也可携带最新固件版本等信息。"""
 
-    firmware_version: Optional[str] = Field(default=None, max_length=64)
+    firmware_version: Optional[str] = Field(
+        default=None, max_length=64, examples=["1.0.0"]
+    )
 
 
 class HeartbeatResponse(BaseModel):
@@ -62,9 +72,12 @@ class DeviceConnectRequest(BaseModel):
     app_client_id: str = Field(
         min_length=8,
         max_length=128,
+        examples=["3f2a9c1e-8b7d-4c65-9a10-2d6e5f7b8c90"],
         description="手机端生成的安装/实例唯一 ID（UUID），同一台手机保持不变",
     )
-    user_id: Optional[str] = Field(default=None, max_length=64)
+    user_id: Optional[str] = Field(
+        default=None, max_length=64, examples=["user_1001"]
+    )
 
 
 class DeviceConnectResponse(BaseModel):
@@ -91,17 +104,20 @@ class DeviceDisconnectRequest(BaseModel):
         default=None,
         min_length=8,
         max_length=64,
+        examples=["conn_20261119_ab12cd34"],
         description="connect 返回的连接 ID；提供时优先按它关闭",
     )
     app_client_id: Optional[str] = Field(
         default=None,
         min_length=8,
         max_length=128,
+        examples=["3f2a9c1e-8b7d-4c65-9a10-2d6e5f7b8c90"],
         description="手机端安装实例 ID；未传 connection_id 时用它解析活跃连接",
     )
     user_id: Optional[str] = Field(
         default=None,
         max_length=64,
+        examples=["user_1001"],
         description="可选，传入时作为解析活跃连接的附加过滤条件",
     )
 

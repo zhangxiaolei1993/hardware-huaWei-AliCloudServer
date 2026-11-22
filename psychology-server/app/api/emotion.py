@@ -3,9 +3,9 @@
 上传：Atlas 测评结束后一次性批量上传原始 timeline，服务器重算结果。
 查询：Flutter 通过 result 接口获取最终结果。
 """
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Request, Response
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.security import get_current_device, require_api_key
@@ -45,7 +45,7 @@ async def _request_bytes(request: Request) -> int:
     ),
 )
 def upload_emotion_data(
-    session_id: str,
+    session_id: Annotated[str, Path(examples=["s_20261119_ab12cd34"], description="会话号 S1")],
     req: EmotionUploadRequest,
     response: Response,
     db: DBSession = Depends(get_db),
@@ -154,7 +154,7 @@ def get_emotion_result(session_id: str, db: DBSession = Depends(get_db)) -> Any:
     ),
 )
 def put_device_status(
-    device_id: str,
+    device_id: Annotated[str, Path(examples=["atlas_001"], description="设备 ID")],
     req: DeviceEmotionStatusRequest,
     db: DBSession = Depends(get_db),
     device: Device = Depends(get_current_device),

@@ -31,12 +31,14 @@ ExpressionType = Literal[
 
 class TimelineItem(BaseModel):
     relative_seconds: float = Field(
-        ge=-5.0, description="相对 session 开始的秒数（允许 -5s 锚点容差）"
+        ge=-5.0,
+        examples=[0.5],
+        description="相对 session 开始的秒数（允许 -5s 锚点容差）",
     )
-    expression: ExpressionType
-    confidence: float = Field(ge=0.0, le=1.0)
+    expression: ExpressionType = Field(examples=["happiness"])
+    confidence: float = Field(ge=0.0, le=1.0, examples=[0.92])
     frame_index: Optional[int] = Field(
-        default=None, ge=0, description="摄像头帧序号（v2 推荐，v1 缺失不拒收）"
+        default=None, ge=0, examples=[30], description="摄像头帧序号（v2 推荐，v1 缺失不拒收）"
     )
 
 
@@ -57,10 +59,18 @@ class EmotionUploadRequest(BaseModel):
     client_request_id: str = Field(
         min_length=8,
         max_length=128,
+        examples=["req-20261119-0001"],
         description="客户端生成的唯一请求 ID，用于防止网络重试导致重复插入",
     )
-    session_meta: SessionMeta = Field(default_factory=SessionMeta)
-    timeline: List[TimelineItem] = Field(min_length=1, max_length=50000)
+    session_meta: SessionMeta = Field(
+        default_factory=SessionMeta,
+        examples=[{"elapsed_seconds": 120.0, "video_frames": 3600, "display_fps": 30.0}],
+    )
+    timeline: List[TimelineItem] = Field(
+        min_length=1,
+        max_length=50000,
+        examples=[[{"relative_seconds": 0.5, "expression": "happiness", "confidence": 0.92}]],
+    )
 
     # ---- 分级兼容接收（P0-14）：v1 固件不带这些字段，全部可选 ----
     stream_id: Optional[str] = Field(default=None, max_length=40)
@@ -98,13 +108,17 @@ class EmotionResultResponse(BaseModel):
 class DeviceEmotionStatusRequest(BaseModel):
     """Atlas 约每 3 秒上报一次的当前识别状态。"""
 
-    face_detected: bool = Field(description="当前帧是否检测到人脸")
-    expression_detected: bool = Field(description="当前是否有效识别出表情")
+    face_detected: bool = Field(examples=[True], description="当前帧是否检测到人脸")
+    expression_detected: bool = Field(
+        examples=[True], description="当前是否有效识别出表情"
+    )
     current_expression: Optional[ExpressionType] = Field(
-        default=None, description="当前表情；识别到表情时必填且为 8 类之一"
+        default=None,
+        examples=["happiness"],
+        description="当前表情；识别到表情时必填且为 8 类之一",
     )
     confidence: Optional[float] = Field(
-        default=None, ge=0.0, le=1.0, description="当前表情置信度，0~1"
+        default=None, ge=0.0, le=1.0, examples=[0.92], description="当前表情置信度，0~1"
     )
 
     @model_validator(mode="after")

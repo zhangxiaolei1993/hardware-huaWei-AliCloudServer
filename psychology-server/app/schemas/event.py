@@ -71,12 +71,24 @@ class TimelineEventIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    event_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$", max_length=32)
-    event_type: EventType
-    occurred_at: datetime
-    relative_seconds: float = Field(ge=-60.0, description="相对锚点秒数，允许 -60s 首题前锚缓冲")
-    device_id: Optional[str] = Field(default=None, max_length=64)
-    stream_id: Optional[str] = Field(default=None, max_length=40)
+    event_id: str = Field(
+        pattern=r"^[0-9a-fA-F]{32}$",
+        max_length=32,
+        examples=["9f8e7d6c5b4a39281706f5e4d3c2b1a0"],
+    )
+    event_type: EventType = Field(examples=["question_shown"])
+    occurred_at: datetime = Field(examples=["2026-11-19T10:00:00Z"])
+    relative_seconds: float = Field(
+        ge=-60.0,
+        examples=[12.5],
+        description="相对锚点秒数，允许 -60s 首题前锚缓冲",
+    )
+    device_id: Optional[str] = Field(
+        default=None, max_length=64, examples=["atlas_001"]
+    )
+    stream_id: Optional[str] = Field(
+        default=None, max_length=40, examples=["app_timeline"]
+    )
     device_timestamp: Optional[str] = Field(default=None, max_length=40)
     monotonic_ms: Optional[int] = None
     clock_offset_ms: Optional[int] = None
@@ -84,11 +96,17 @@ class TimelineEventIn(BaseModel):
     task_id: Optional[str] = Field(default=None, max_length=64)
     questionnaire_id: Optional[str] = Field(default=None, max_length=64)
     questionnaire_version: Optional[str] = Field(default=None, max_length=32)
-    question_id: Optional[str] = Field(default=None, max_length=64)
-    question_index: Optional[int] = Field(default=None, ge=0)
-    duration_ms: Optional[int] = Field(default=None, ge=0)
-    protocol_version: Optional[str] = Field(default=None, max_length=16)
-    payload: Optional[Dict[str, Any]] = None
+    question_id: Optional[str] = Field(
+        default=None, max_length=64, examples=["q_001"]
+    )
+    question_index: Optional[int] = Field(default=None, ge=0, examples=[1])
+    duration_ms: Optional[int] = Field(default=None, ge=0, examples=[1500])
+    protocol_version: Optional[str] = Field(
+        default=None, max_length=16, examples=["1.0"]
+    )
+    payload: Optional[Dict[str, Any]] = Field(
+        default=None, examples=[{"question_type": "single_choice", "render_ms": 120}]
+    )
     # 客户端伪造的质量字段：接受但不采信
     quality: Optional[str] = None
     quality_info: Optional[Dict[str, Any]] = None
@@ -104,10 +122,29 @@ class TimelineEventIn(BaseModel):
 class TimelineEventBatchRequest(BaseModel):
     """事件批量上传请求（``events`` 先按原始 dict 接收，便于统一做禁字段检查）。"""
 
-    client_request_id: str = Field(min_length=8, max_length=128)
-    schema_version: str = Field(default="1.0", max_length=16)
-    source: Literal["device", "app", "server"] = "app"
-    events: List[Dict[str, Any]] = Field(min_length=1, max_length=2000)
+    client_request_id: str = Field(
+        min_length=8, max_length=128, examples=["req-20261119-0001"]
+    )
+    schema_version: str = Field(default="1.0", max_length=16, examples=["1.0"])
+    source: Literal["device", "app", "server"] = Field(
+        default="app", examples=["app"], description="事件来源"
+    )
+    events: List[Dict[str, Any]] = Field(
+        min_length=1,
+        max_length=2000,
+        examples=[
+            [
+                {
+                    "event_id": "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+                    "event_type": "question_shown",
+                    "occurred_at": "2026-11-19T10:00:00Z",
+                    "relative_seconds": 12.5,
+                    "question_id": "q_001",
+                    "payload": {"question_type": "single_choice", "render_ms": 120},
+                }
+            ]
+        ],
+    )
 
 
 class TimelineUploadResponse(BaseModel):

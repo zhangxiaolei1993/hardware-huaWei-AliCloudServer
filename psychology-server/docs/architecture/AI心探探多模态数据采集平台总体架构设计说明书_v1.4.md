@@ -1965,7 +1965,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | 认证类型 | 请求头 | 适用 | 现状 |
 | --- | --- | --- | --- |
 | 设备认证 | `X-Device-Id` + `X-Device-Token` | 设备写操作 | 已有 |
-| 应用认证 | `X-Api-Key`（`X-App-Key` 为兼容别名，取值相同） | Flutter 写操作（事件、结果同步） | **统一** |
+| 应用认证 | `X-Api-Key`（唯一密钥） | Flutter 查询/绑定/导出、设备管理 | **统一** |
 | 管理认证 | `X-Api-Key` | 科研查询、导出、设备管理 | **新增** |
 | 免认证 | — | 仅 `GET /health` 与设备 `active-session` 轮询（保留现状） | 已有 |
 
@@ -2055,7 +2055,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 | 项 | 内容 |
 | --- | --- |
 | 方法/URL | `GET /devices?limit=50&cursor=...` |
-| 认证 | **`X-Api-Key`**（`X-App-Key` 为同值兼容别名） |
+| 认证 | **`X-Api-Key`**（唯一密钥；旧头 `X-App-Key` 不再接受） |
 | 变更 | 分页；字段裁剪（去掉 `device_token` 永不出现在任何响应——现状已达标，需保持） |
 | 保留 | 手机端需要选择设备 → 用 `X-Api-Key` 调用，响应仅 `device_id`/`device_name`/`device_type`/`model`/`status` |
 
@@ -2166,7 +2166,7 @@ INDEX  (subject_ref, created_at)                -- 按受试者查
 
 #### S-2 查询会话（复用，扩展）
 
-`GET /sessions/{session_id}` — 认证：`X-Api-Key`（`X-App-Key` 为兼容别名）；响应新增 `source_system`、`external_session_id`、`anchor`、`ended_reason`、`late_upload_deadline`、`devices[]`。
+`GET /sessions/{session_id}` — 认证：`X-Api-Key`；响应新增 `source_system`、`external_session_id`、`anchor`、`ended_reason`、`late_upload_deadline`、`devices[]`。
 
 #### S-3 更新会话状态（改造）
 
@@ -3558,8 +3558,8 @@ stateDiagram-v2
 
 | 位置 | 要求 |
 | --- | --- |
-| Nginx | access log **不记录** `Authorization` / `X-Device-Token` / `X-Api-Key`（含旧名 `X-App-Key`）；只记方法、路径、状态码、耗时、脱敏 IP |
-| 服务器 A | 设备 token、`X-Api-Key`（含旧名 `X-App-Key`）、答案文本、转写文本**不得**出现在 INFO 及以上日志；异常日志只记 token 前 4 位 + 长度 |
+| Nginx | access log **不记录** `Authorization` / `X-Device-Token` / `X-Api-Key`；只记方法、路径、状态码、耗时、脱敏 IP |
+| 服务器 A | 设备 token、`X-Api-Key`、答案文本、转写文本**不得**出现在 INFO 及以上日志；异常日志只记 token 前 4 位 + 长度 |
 | Flutter | 移除 token 与响应体打印；错误上报不含答案与转写 |
 | 设备端 | 不打印 token；留底文件权限 `600` |
 
@@ -4025,7 +4025,7 @@ sqlite3 /opt/backup/psychology-YYYYmmdd-HHMMSS.db "PRAGMA integrity_check;"
 | AC-24 | `revoke` 后设备再注册 / 再上传 | 注册 403 `DEVICE_REVOKED`；上传 401；`reinstate` 后新 token 可用 | P0 |
 | AC-25 | 公网 `https://api.<域名>/api/v1/health` 与上传接口 | 443 正常、证书链有效、TLS 1.2/1.3；`http://<域名>` 301 到 https（**已取消，原 P1 安全专项**） | — |
 | AC-26 | 旧固件（仅 http、硬编码 8000）在过渡期上传 | 200 成功；非白名单路径 404；审计记录旧端流量；响应头 `X-Protocol-Required: https`（**已取消，原 P1 安全专项**） | — |
-| AC-27 | 检查 A 应用日志 | **不含** `Authorization`/`X-Device-Token`/`X-Api-Key`（含旧名 `X-App-Key`）/答案/转写原文（**日志脱敏仍属 P0 强制项**；Nginx access log 不再纳入） | P0 |
+| AC-27 | 检查 A 应用日志 | **不含** `Authorization`/`X-Device-Token`/`X-Api-Key`/答案/转写原文（**日志脱敏仍属 P0 强制项**；Nginx access log 不再纳入） | P0 |
 | AC-28 | 证书过期或 TLS 握手失败（模拟） | 客户端**不降级**到 http；直接失败并留底；告警可见（**已取消，原 P1 安全专项**） | — |
 | AC-29 | 同步请求携带 `score_list`，或携带 `radar_charts.chart1_phq9_items`（真实样本形态） | 422 `FORBIDDEN_FIELD`；**不得因缺少该图而报错**（缺 `chart1` 是正常请求） | P0 |
 | AC-30 | 按 §14.2.1 用真实样本（`session_id=1742`，仅 `chart2`+`chart3`）构造请求 | 201；`dimensions` 恰 7 项；`radar_norm.series[chart2]` 的 `norm=0.2233/0.6667/0.3333` 且 `unit_max_source=bank_scores`；`series[chart3].norm_status=unit_max_unknown` 且 `norm` 全 `null`；`scoring_mode=option`、`state_update_status=scheduled` 均已入库 | P0 |
@@ -4705,7 +4705,7 @@ sqlite3 /opt/backup/psychology-YYYYmmdd-HHMMSS.db "PRAGMA integrity_check;"
 
 **原因**：`X-App-Key` 仅被 3 个设备管理 POST（`rotate-token` / `revoke` / `reinstate`）强制要求，其余接口（含 `GET /devices/{device_id}`）已支持 `X-Api-Key`；Flutter 侧查询、设备绑定、导出均只发 `X-Api-Key`，写入侧不校验 App Key，`atlas_001` 只用设备 token。维护两把密钥没有安全收益，反而增加轮换与配置成本。
 
-**兼容性**：`X-App-Key` 保留为 `X-Api-Key` 的**同值兼容别名**（请求头名兼容，取值必须是同一把密钥），供运维既有脚本过渡；旧值 `change-me-app-key` 立即失效。文档与示例统一写 `X-Api-Key`。
+**兼容性**：`X-App-Key` **已彻底移除**——不再参与鉴权，也不再出现在 OpenAPI/Swagger 中；调用一律使用 `X-Api-Key`，旧头即使取值正确也返回 401。Flutter 与设备端均不依赖该头，仅手工脚本需改用 `X-Api-Key`。旧值 `change-me-app-key` 同样失效。文档与示例统一写 `X-Api-Key`。
 
 **同步修改**：§12.1 认证表、§12.2 D-3/D-4/D-6、§12.3 S-1/S-2/S-3/S-4、§12.4 U-2/U-4、§12.5、§13 兼容矩阵、§17.2、§17.4 I5/I9、§17.5.7 日志脱敏、§21 AC-27、附录 D 相关表述；P0 两份清单中的示例同步改为 `X-Api-Key`。
 

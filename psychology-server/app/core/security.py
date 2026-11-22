@@ -34,14 +34,18 @@ def _api_key_matches(provided: Optional[str]) -> bool:
 
 
 def require_app_key(
-    x_app_key: Optional[str] = Header(default=None, alias="X-App-Key"),
-    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
+    x_api_key: Optional[str] = Header(
+        default=None,
+        alias="X-Api-Key",
+        description="唯一 API 密钥（与 QUERY_API_KEY 一致）",
+        examples=["change-me-query-key"],
+    ),
 ) -> None:
-    """设备管理接口认证（§17.4 I5/I9）：统一使用 ``query_api_key``。
+    """设备管理接口认证（§17.4 I5/I9）：统一使用 ``query_api_key``（`X-Api-Key`）。
 
-    ``X-App-Key`` 仅作为 ``X-Api-Key`` 的兼容别名保留，两者取值相同。
+    旧的 `X-App-Key` 头已不再接受，也不出现在 OpenAPI/Swagger 中。
     """
-    if not (_api_key_matches(x_api_key) or _api_key_matches(x_app_key)):
+    if not _api_key_matches(x_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="UNAUTHORIZED: invalid or missing X-Api-Key",
@@ -49,7 +53,12 @@ def require_app_key(
 
 
 def require_api_key(
-    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
+    x_api_key: Optional[str] = Header(
+        default=None,
+        alias="X-Api-Key",
+        description="唯一 API 密钥（与 QUERY_API_KEY 一致）",
+        examples=["change-me-query-key"],
+    ),
 ) -> None:
     """查询接口基础鉴权（P0-17 / AC-15）：设备列表、会话查询、结果查询。"""
     if not _api_key_matches(x_api_key):
@@ -60,8 +69,17 @@ def require_api_key(
 
 
 def require_research_api_key(
-    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
-    api_key: Optional[str] = Query(default=None),
+    x_api_key: Optional[str] = Header(
+        default=None,
+        alias="X-Api-Key",
+        description="唯一 API 密钥（与 QUERY_API_KEY 一致）",
+        examples=["change-me-query-key"],
+    ),
+    api_key: Optional[str] = Query(
+        default=None,
+        description="API 密钥；与 `X-Api-Key` 头二选一，仅用于浏览器直接下载",
+        examples=["change-me-query-key"],
+    ),
 ) -> None:
     """科研导出 GET 接口鉴权：优先 ``X-Api-Key``，其次 ``?api_key=``。
 
@@ -104,8 +122,16 @@ def _reject_credentials(
 
 def get_current_device(
     request: Request,
-    x_device_id: Optional[str] = Header(default=None),
-    x_device_token: Optional[str] = Header(default=None),
+    x_device_id: Optional[str] = Header(
+        default=None,
+        description="设备 ID（注册时分配的 device_id）",
+        examples=["atlas_001"],
+    ),
+    x_device_token: Optional[str] = Header(
+        default=None,
+        description="设备 token（注册/重置时下发的 64 位十六进制串）",
+        examples=["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
+    ),
     db: DBSession = Depends(get_db),
 ) -> Device:
     """设备认证依赖：请求头携带 X-Device-Id / X-Device-Token。"""
@@ -150,10 +176,22 @@ def get_current_device(
 
 def get_device_reader(
     request: Request,
-    x_device_id: Optional[str] = Header(default=None),
-    x_device_token: Optional[str] = Header(default=None),
-    x_app_key: Optional[str] = Header(default=None, alias="X-App-Key"),
-    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
+    x_device_id: Optional[str] = Header(
+        default=None,
+        description="设备 ID（设备自检时携带）",
+        examples=["atlas_001"],
+    ),
+    x_device_token: Optional[str] = Header(
+        default=None,
+        description="设备 token（设备自检时携带）",
+        examples=["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
+    ),
+    x_api_key: Optional[str] = Header(
+        default=None,
+        alias="X-Api-Key",
+        description="唯一 API 密钥（手机/查询侧调用）",
+        examples=["change-me-query-key"],
+    ),
     db: DBSession = Depends(get_db),
 ) -> Optional[Device]:
     """设备详情读取认证（§12.2 D-4）：设备 token 或 `X-Api-Key` 二者任一。
@@ -161,8 +199,7 @@ def get_device_reader(
     - 带任一设备头（X-Device-Id / X-Device-Token）时，必须通过设备凭证校验：
       无效或已吊销一律 401，设备端据此触发重新注册；返回 Device 供路由校验
       `{device_id}` 与 `X-Device-Id` 一致（不一致 → 403）。
-    - 仅带合法 X-Api-Key（`X-App-Key` 为兼容别名，取值相同）时返回 None
-      （手机/查询侧合法调用）。
+    - 仅带合法 `X-Api-Key` 时返回 None（手机/查询侧合法调用）。
     - 两者都缺失或均无效 → 401。
     """
     if x_device_id or x_device_token:
@@ -173,7 +210,7 @@ def get_device_reader(
             db=db,
         )
 
-    if _api_key_matches(x_api_key) or _api_key_matches(x_app_key):
+    if _api_key_matches(x_api_key):
         return None
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -183,8 +220,16 @@ def get_device_reader(
 
 def get_optional_device(
     request: Request,
-    x_device_id: Optional[str] = Header(default=None),
-    x_device_token: Optional[str] = Header(default=None),
+    x_device_id: Optional[str] = Header(
+        default=None,
+        description="设备 ID（可选；带设备头时必须配对）",
+        examples=["atlas_001"],
+    ),
+    x_device_token: Optional[str] = Header(
+        default=None,
+        description="设备 token（可选；带设备头时必须有效）",
+        examples=["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
+    ),
     db: DBSession = Depends(get_db),
 ) -> Optional[Device]:
     """可选设备认证：未带头 → None；带头则必须有效（无效仍 401）。"""

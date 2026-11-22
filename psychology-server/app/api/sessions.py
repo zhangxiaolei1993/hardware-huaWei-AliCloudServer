@@ -1,7 +1,7 @@
 """会话 API：创建 / 查询 / 状态流转（running / completed / aborted）。"""
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Response
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.security import get_optional_device, require_api_key
@@ -225,7 +225,7 @@ def get_session(session_id: str, db: DBSession = Depends(get_db)) -> Any:
     ),
 )
 def update_session_status(
-    session_id: str,
+    session_id: Annotated[str, Path(examples=["s_20261119_ab12cd34"], description="会话号 S1")],
     req: SessionStatusUpdateRequest,
     db: DBSession = Depends(get_db),
     device: Device | None = Depends(get_optional_device),
@@ -253,7 +253,7 @@ def update_session_status(
     ),
 )
 def bind_session_device(
-    session_id: str,
+    session_id: Annotated[str, Path(examples=["s_20261119_ab12cd34"], description="会话号 S1")],
     req: SessionDeviceBindRequest,
     db: DBSession = Depends(get_db),
 ) -> Any:

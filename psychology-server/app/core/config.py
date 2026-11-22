@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # 唯一 API 密钥（X-Api-Key，P0-17 / AC-15 / §17.4 I5/I9）；
     # 查询、科研导出与设备管理接口共用；生产必须在 .env 覆盖，不落库、不进日志。
-    # X-App-Key 仅为兼容别名，取值与本项相同。
+    # 旧头 X-App-Key 已不再接受（不参与鉴权、不出现在 OpenAPI）。
     query_api_key: str = "change-me-query-key"
     # 受试者脱敏标识 HMAC 盐（P0-9 / M7）；生产必须在 .env 覆盖
     research_salt: str = "change-me-research-salt"

@@ -7,12 +7,26 @@ from pydantic import BaseModel, ConfigDict, Field
 class ExportCreateRequest(BaseModel):
     """创建导出请求体：`format` + 可选时间窗（秒，相对锚点）。"""
 
-    format: Literal["csv", "json"] = "json"
-    modalities: Optional[List[str]] = None
-    from_seconds: Optional[float] = Field(default=None, alias="from")
-    to_seconds: Optional[float] = Field(default=None, alias="to")
+    format: Literal["csv", "json"] = Field(
+        default="json", examples=["json"], description="导出格式：csv 或 json"
+    )
+    modalities: Optional[List[str]] = Field(
+        default=None, examples=[["emotion"]], description="模态子集；不填＝全部"
+    )
+    from_seconds: Optional[float] = Field(
+        default=None, alias="from", examples=[0.0], description="起始秒数（含）"
+    )
+    to_seconds: Optional[float] = Field(
+        default=None, alias="to", examples=[120.0], description="结束秒数（含）"
+    )
 
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    model_config = ConfigDict(
+        populate_by_name=True,
+        extra="forbid",
+        json_schema_extra={
+            "example": {"format": "json", "from": 0.0, "to": 120.0}
+        },
+    )
 
 
 class ExportCreateResponse(BaseModel):

@@ -1,7 +1,7 @@
 """Timeline 事件 API：批量上传与查询（v1.4 §12.4 U-2 / §12.5 Q-1）。"""
-from typing import Any, List, Optional
+from typing import Annotated, Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.security import get_optional_device, require_api_key
@@ -39,7 +39,7 @@ def _get_session_or_404(db: DBSession, session_id: str) -> SessionModel:
     ),
 )
 def upload_events(
-    session_id: str,
+    session_id: Annotated[str, Path(examples=["s_20261119_ab12cd34"], description="会话号 S1")],
     req: TimelineEventBatchRequest,
     db: DBSession = Depends(get_db),
     device: Optional[Device] = Depends(get_optional_device),
@@ -77,14 +77,26 @@ def upload_events(
     dependencies=[Depends(require_api_key)],
 )
 def get_events(
-    session_id: str,
+    session_id: Annotated[str, Path(examples=["s_20261119_ab12cd34"], description="会话号 S1")],
     db: DBSession = Depends(get_db),
-    from_seconds: Optional[float] = Query(default=None, alias="from"),
-    to_seconds: Optional[float] = Query(default=None, alias="to"),
-    event_type: Optional[List[str]] = Query(default=None),
-    question_id: Optional[str] = None,
-    limit: int = Query(default=200, ge=1, le=2000),
-    cursor: Optional[int] = Query(default=None, ge=0),
+    from_seconds: Optional[float] = Query(
+        default=None, alias="from", examples=[-5.0], description="相对锚点的起始秒数（含）"
+    ),
+    to_seconds: Optional[float] = Query(
+        default=None, alias="to", examples=[600.0], description="相对锚点的结束秒数（含）"
+    ),
+    event_type: Optional[List[str]] = Query(
+        default=None, examples=[["question_shown"]], description="事件类型，可重复传入"
+    ),
+    question_id: Optional[str] = Query(
+        default=None, examples=["q_001"], description="题目 ID 过滤"
+    ),
+    limit: int = Query(
+        default=200, ge=1, le=2000, examples=[200], description="单页条数（1~2000）"
+    ),
+    cursor: Optional[int] = Query(
+        default=None, ge=0, examples=[0], description="上一页最后一条的 id，用于翻页"
+    ),
 ) -> Any:
     session = _get_session_or_404(db, session_id)
     events = event_service.list_events(
