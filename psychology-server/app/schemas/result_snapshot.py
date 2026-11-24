@@ -120,3 +120,5 @@ class ResultSyncResponse(BaseModel):
     trust_level: str
     duplicate: bool = False
     received_at: datetime
+    # 0012 科研域：会话绑定被试时返回对应测评 ID；旧客户端忽略即可
+    assessment_id: Optional[str] = None

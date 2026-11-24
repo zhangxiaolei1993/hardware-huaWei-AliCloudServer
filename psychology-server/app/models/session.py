@@ -36,6 +36,10 @@ class SessionModel(Base):
         Index("ix_sessions_device_status", "device_id", "status"),
         Index("ix_sessions_status_ended", "status", "ended_at"),
         Index("ix_sessions_subject_created", "subject_ref", "created_at"),
+        # 0012 科研域：逻辑关联，不建外键（sessions 为高频 P0 表）
+        Index("ix_sessions_participant", "participant_id"),
+        Index("ix_sessions_project_created", "project_id", "created_at"),
+        Index("ix_sessions_participant_started", "participant_id", "started_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -55,6 +59,17 @@ class SessionModel(Base):
     # 是否因缺少 external_user_id 回退使用 user_id 计算（P0-9 标记）
     deprecated_identity_used: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0", nullable=False
+    )
+    # ---- 0012 科研域：被试 / 项目 / 组别（逻辑关联，可空，旧会话保持 NULL）----
+    participant_id: Mapped[Optional[str]] = mapped_column(
+        String(40), nullable=True, index=True
+    )
+    project_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    # 施测时组别；被试后续换组不回写
+    group_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    # live（实时采集）/ legacy_import（无 S1 的离线历史合成会话）
+    data_origin: Mapped[str] = mapped_column(
+        String(16), default="live", server_default="live", nullable=False
     )
     # emotion / multimodal / assessment / physiological / speech / custom
     session_type: Mapped[str] = mapped_column(String(32), default="emotion")

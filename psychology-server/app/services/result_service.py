@@ -268,14 +268,27 @@ def _previous_snapshot(
 
 
 def _duplicate_response(
-    snapshot: ExternalResultSnapshot, duplicate: bool
-) -> Tuple[ExternalResultSnapshot, bool]:
-    return snapshot, duplicate
+    db: DBSession,
+    session: SessionModel,
+    snapshot: ExternalResultSnapshot,
+    duplicate: bool,
+):
+    """返回快照并同步维护「会话 × 量表」测评记录（科研域 0012）。"""
+    from app.services.research_service import ensure_assessment_for_snapshot
+
+    assessment = ensure_assessment_for_snapshot(db, session, snapshot)
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot, duplicate, assessment
 
 
 def create_snapshot(
     db: DBSession, session: SessionModel, payload: Dict[str, Any]
-) -> Tuple[ExternalResultSnapshot, bool]:
+):
+    """落库结果快照；会话已绑定被试时同步创建/更新 ``research_assessments``。
+
+    返回值：``(snapshot, duplicate, assessment_or_none)``。
+    """
     forbidden = _forbidden_field(payload)
     if forbidden is not None:
         raise ResultSyncError(
@@ -307,7 +320,7 @@ def create_snapshot(
     )
     if existing is not None:
         if existing.source_payload_sha256 == req.source_payload_sha256:
-            return _duplicate_response(existing, True)
+            return _duplicate_response(db, session, existing, True)
         raise ResultSyncError(
             409, "IDEMPOTENCY_CONFLICT: same key with different payload"
         )
@@ -380,7 +393,7 @@ def create_snapshot(
         )
         if existing is not None:
             if existing.source_payload_sha256 == req.source_payload_sha256:
-                return _duplicate_response(existing, True)
+                return _duplicate_response(db, session, existing, True)
             raise ResultSyncError(
                 409, "IDEMPOTENCY_CONFLICT: same key with different payload"
             )
@@ -388,4 +401,4 @@ def create_snapshot(
             409, "IDEMPOTENCY_CONFLICT: snapshot already exists"
         )
     db.refresh(snapshot)
-    return _duplicate_response(snapshot, False)
+    return _duplicate_response(db, session, snapshot, False)

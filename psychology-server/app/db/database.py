@@ -49,6 +49,8 @@ def init_db() -> None:
         emotion_record,
         emotion_result,
         emotion_result_version,
+        external_result_snapshot,
+        research,
         session,
     )
 

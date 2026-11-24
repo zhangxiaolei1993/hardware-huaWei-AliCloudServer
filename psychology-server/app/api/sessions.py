@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session as DBSession
 from app.core.security import get_optional_device, require_api_key
 from app.db.database import get_db
 from app.models.device import Device
+from app.models.research import ResearchParticipant
 from app.models.session import SessionModel
 from app.schemas.session import (
     AnchorOut,
@@ -57,6 +58,10 @@ def _to_out(session: SessionModel) -> SessionOut:
         ended_at=session.ended_at,
         created_at=session.created_at,
         updated_at=session.updated_at,
+        participant_id=session.participant_id,
+        project_id=session.project_id,
+        group_id=session.group_id,
+        data_origin=session.data_origin,
     )
 
 
@@ -137,6 +142,23 @@ def create_session(
     if target_device is None:
         raise HTTPException(status_code=404, detail=f"device {req.device_id} not registered")
 
+    # 科研版：可选绑定被试，校验存在且未归档
+    if req.participant_id:
+        participant = (
+            db.query(ResearchParticipant)
+            .filter(ResearchParticipant.participant_id == req.participant_id)
+            .first()
+        )
+        if participant is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"participant {req.participant_id} not found",
+            )
+        if participant.status != "active":
+            raise HTTPException(
+                status_code=409, detail="participant is archived"
+            )
+
     # 幂等重放优先于在线检查：网络重试时设备可能刚好离线，仍应返回原会话
     if req.client_request_id:
         existing = session_service.find_by_client_request_id(
@@ -164,6 +186,10 @@ def create_session(
                 created_at=existing.created_at,
                 subject_ref=existing.subject_ref,
                 deprecated_identity_used=existing.deprecated_identity_used,
+                participant_id=existing.participant_id,
+                project_id=existing.project_id,
+                group_id=existing.group_id,
+                data_origin=existing.data_origin,
             )
 
     # 设备必须在线才允许创建会话；离线时拒绝，避免手机误开测评
@@ -181,6 +207,7 @@ def create_session(
         external_session_id=req.external_session_id,
         client_request_id=req.client_request_id,
         external_user_id=req.external_user_id,
+        participant_id=req.participant_id,
     )
     if not created:
         response.status_code = 200
@@ -197,6 +224,10 @@ def create_session(
         created_at=session.created_at,
         subject_ref=session.subject_ref,
         deprecated_identity_used=session.deprecated_identity_used,
+        participant_id=session.participant_id,
+        project_id=session.project_id,
+        group_id=session.group_id,
+        data_origin=session.data_origin,
     )
 
 
@@ -220,6 +251,8 @@ def get_session(session_id: str, db: DBSession = Depends(get_db)) -> Any:
     description=(
         "状态流转：`created → running → completed / aborted`。传 `running` 记录 started_at；"
         "传 `completed` 或 `aborted` 记录 ended_at 与 ended_reason。\n\n"
+        "兼容客户端：`interrupted` 会被接受并落库为 `aborted`，"
+        "`ended_reason=client_interrupted`。\n\n"
         "**免认证即可调用**（session_id 为随机 UUID、不可猜测）：手机 App 可直接收尾；"
         "若请求携带设备认证头，则必须是本设备的会话（不匹配返回 403）。"
     ),

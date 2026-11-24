@@ -46,6 +46,9 @@ class ExternalResultSnapshot(Base):
             "session_id",
             "questionnaire_code",
         ),
+        # 0012 科研域：逻辑关联到 assessment / participant，可空
+        Index("ix_external_result_snapshots_assessment", "assessment_id"),
+        Index("ix_external_result_snapshots_participant", "participant_id"),
     )
 
     snapshot_id: Mapped[str] = mapped_column(String(40), primary_key=True)
@@ -54,6 +57,13 @@ class ExternalResultSnapshot(Base):
     )
     source_system: Mapped[str] = mapped_column(String(32), nullable=False)
     source_result_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # 0012 科研域：所属测评与被试（逻辑关联，历史快照保持 NULL）
+    assessment_id: Mapped[Optional[str]] = mapped_column(
+        String(40), nullable=True, index=True
+    )
+    participant_id: Mapped[Optional[str]] = mapped_column(
+        String(40), nullable=True, index=True
+    )
     questionnaire_code: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True
     )

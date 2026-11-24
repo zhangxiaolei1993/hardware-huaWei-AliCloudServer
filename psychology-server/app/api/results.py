@@ -52,7 +52,9 @@ def sync_result(
         raise HTTPException(status_code=403, detail="session belongs to another device")
 
     try:
-        snapshot, duplicate = result_service.create_snapshot(db, session, payload)
+        snapshot, duplicate, assessment = result_service.create_snapshot(
+            db, session, payload
+        )
     except result_service.ResultSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
@@ -66,4 +68,5 @@ def sync_result(
         trust_level=snapshot.trust_level,
         duplicate=duplicate,
         received_at=snapshot.received_at,
+        assessment_id=assessment.assessment_id if assessment else None,
     )

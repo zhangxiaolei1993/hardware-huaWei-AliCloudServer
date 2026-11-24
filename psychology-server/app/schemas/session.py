@@ -60,6 +60,13 @@ class SessionCreateRequest(BaseModel):
         examples=["conn_20261119_ab12cd34"],
         description="手机端使用：connect 返回的有效 connection_id；设备端可留空改用请求头 token",
     )
+    # 科研版：可选绑定被试；绑定后会话自动继承项目/组别
+    participant_id: Optional[str] = Field(
+        default=None,
+        max_length=40,
+        examples=["pt_0123456789abcdef"],
+        description="科研被试 ID（可选）；绑定后会话继承被试的项目与组别",
+    )
 
     @field_validator("external_session_id")
     @classmethod
@@ -91,6 +98,11 @@ class SessionCreatedResponse(BaseModel):
     # P0-9：脱敏受试者标识与回退标记
     subject_ref: Optional[str] = None
     deprecated_identity_used: bool = False
+    # 0012 科研域（新增可选字段，旧客户端可忽略）
+    participant_id: Optional[str] = None
+    project_id: Optional[str] = None
+    group_id: Optional[str] = None
+    data_origin: Optional[str] = None
 
 
 class ActiveSessionResponse(BaseModel):
@@ -107,8 +119,13 @@ class ActiveSessionResponse(BaseModel):
 
 
 class SessionStatusUpdateRequest(BaseModel):
-    status: Literal["running", "completed", "aborted"] = Field(
-        examples=["running"], description="目标状态：running / completed / aborted"
+    status: Literal["running", "completed", "aborted", "interrupted"] = Field(
+        examples=["running"],
+        description=(
+            "目标状态：running / completed / aborted / interrupted。"
+            "为兼容客户端，interrupted 会落库为 aborted，"
+            "ended_reason 记录 client_interrupted。"
+        ),
     )
 
 
@@ -129,6 +146,11 @@ class SessionOut(BaseModel):
     ended_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    # 0012 科研域（新增可选字段）
+    participant_id: Optional[str] = None
+    project_id: Optional[str] = None
+    group_id: Optional[str] = None
+    data_origin: Optional[str] = None
 
 
 class SessionDeviceBindRequest(BaseModel):

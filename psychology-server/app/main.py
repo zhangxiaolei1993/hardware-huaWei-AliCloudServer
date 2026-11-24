@@ -17,7 +17,16 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.api import devices, emotion, events, exports, health, results, sessions
+from app.api import (
+    devices,
+    emotion,
+    events,
+    exports,
+    health,
+    research,
+    results,
+    sessions,
+)
 from app.api.docs_page import router as docs_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
@@ -58,6 +67,12 @@ OPENAPI_TAGS: List[Dict[str, str]] = [
         "description": "**科研导出**：P0 单会话导出（csv/json）与 P1-A 科研打包导出"
         "（CSV/JSONL、raw/derived 分目录、数据字典、质量报告与 manifest）。"
         "统一使用 `X-Api-Key` 鉴权，只读访问数据库。",
+    },
+    {
+        "name": "research",
+        "description": "**科研版云端**：项目、实验组、被试、会话绑定、测评与逐题作答、"
+        "AI 对话、异步下载任务、历史迁移。统一使用 `X-Api-Key` 鉴权；"
+        "账号与项目级权限本轮未启用。",
     },
 ]
 
@@ -144,6 +159,7 @@ def create_app() -> FastAPI:
     app.include_router(results.router, prefix="/api/v1")
     app.include_router(exports.router, prefix="/api/v1")
     app.include_router(emotion.router, prefix="/api/v1")
+    app.include_router(research.router, prefix="/api/v1")
 
     return app
 

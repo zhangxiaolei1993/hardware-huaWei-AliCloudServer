@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.database import utcnow
 from app.models.device import Device
+from app.models.research import ResearchParticipant
 from app.models.session import SessionModel
 from app.models.session_device import SessionDevice
 
@@ -73,6 +74,7 @@ def create_session(
     external_session_id: Optional[str] = None,
     client_request_id: Optional[str] = None,
     external_user_id: Optional[str] = None,
+    participant_id: Optional[str] = None,
 ) -> Tuple[SessionModel, bool, List[str]]:
     """创建会话；返回 (会话, 是否新建, 同 N1 的其他 session_id)。
 
@@ -105,6 +107,13 @@ def create_session(
         logger.warning(
             "session identity fallback to user_id (deprecated_identity_used=true)"
         )
+    research_participant: Optional[ResearchParticipant] = None
+    if participant_id:
+        research_participant = (
+            db.query(ResearchParticipant)
+            .filter(ResearchParticipant.participant_id == participant_id)
+            .first()
+        )
     session = SessionModel(
         session_id=uuid.uuid4().hex,
         device_id=device.device_id,
@@ -112,6 +121,12 @@ def create_session(
         external_user_id=external_user_id,
         subject_ref=subject_ref,
         deprecated_identity_used=deprecated_identity_used,
+        participant_id=participant_id,
+        project_id=(
+            research_participant.project_id if research_participant else None
+        ),
+        group_id=research_participant.group_id if research_participant else None,
+        data_origin="live",
         session_type=session_type,
         source_system=source_system,
         external_session_id=external_session_id,
@@ -303,8 +318,15 @@ def get_active_session(
 
 
 def update_status(db: DBSession, session: SessionModel, new_status: str) -> SessionModel:
-    """状态流转：created → running → completed / aborted。"""
+    """状态流转：created → running → completed / aborted。
+
+    兼容客户端：输入 ``interrupted`` 一律落库为 ``aborted``，
+    ``ended_reason`` 记录 ``client_interrupted``（P1 修复）。
+    """
     now = utcnow()
+    client_interrupted = new_status == "interrupted"
+    if client_interrupted:
+        new_status = "aborted"
     if new_status == session.status:
         return session
     if new_status == "running":
@@ -325,7 +347,9 @@ def update_status(db: DBSession, session: SessionModel, new_status: str) -> Sess
         if session.started_at is None:
             session.started_at = now
         session.ended_at = now
-        session.ended_reason = "user cancelled"
+        session.ended_reason = (
+            "client_interrupted" if client_interrupted else "user cancelled"
+        )
     else:
         raise ValueError(f"invalid target status: {new_status}")
 
